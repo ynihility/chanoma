@@ -4,26 +4,194 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ちゃのま</title>
+  <!-- 自分のサーバーのスクリプトだけを動かす。万一 HTML が紛れ込んでも、外へ送ったり別のスクリプトを動かしたりできない -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'">
   <style>
-    body { font-family: sans-serif; padding: 24px; }
-    .cards { display: flex; gap: 16px; }
-    /* 下からふわっと現れる動き。backwards で開始前(遅延中)も透明のままにして、ちらつきを防ぐ */
-    .card { font-size: 24px; padding: 24px; animation: card-in 400ms ease-out backwards; }
-    /* 札ごとに0.065秒(65ミリ秒)ずつ開始をずらす */
-    .card:nth-child(2) { animation-delay: 65ms; }
-    .card:nth-child(3) { animation-delay: 130ms; }
-    @keyframes card-in {
-      from { opacity: 0; transform: translateY(20px); }
-      to { opacity: 1; transform: translateY(0); }
+    :root {
+      --wood: #8a5a34;
+      --wood-dark: #5b3820;
+      --tatami: #c9bd7e;
+      --paper: #fff6e0;
+      --ink: #2b1b10;
+      /* 白い文字との比が 4.5 以上になる濃さ（5.58）。高齢の人にも読みやすいように */
+      --accent: #b83f19;
+      --accent-dark: #8f2f10;
+      --shadow: 4px 4px 0 rgba(43, 27, 16, 0.55);
     }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      font-family: "BIZ UDPGothic", "Hiragino Maru Gothic ProN", "Yu Gothic UI", "Meiryo", sans-serif;
+      font-size: 20px;
+      line-height: 1.6;
+      /* 畳のような縞。画像は使わず CSS だけで描く */
+      background:
+        repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.06) 0 2px, transparent 2px 120px),
+        var(--tatami);
+    }
+    header {
+      background: var(--wood);
+      border-bottom: 6px solid var(--wood-dark);
+      padding: 12px 16px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+    h1 { margin: 0; font-size: 28px; color: var(--paper); text-shadow: 2px 2px 0 var(--wood-dark); }
+    h2 { margin: 0 0 8px; font-size: 22px; }
+    main { max-width: 860px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+    .panel {
+      background: var(--paper);
+      border: 4px solid var(--wood-dark);
+      border-radius: 8px;
+      padding: 16px;
+      box-shadow: var(--shadow);
+    }
+    button {
+      font: inherit;
+      min-height: 48px;
+      padding: 6px 16px;
+      color: var(--ink);
+      background: #fff;
+      border: 3px solid var(--ink);
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button:hover { background: #ffe9b8; }
+    /* 黒と白の二重の枠。木の色、畳の色、パネルのどの上でも見える */
+    button:focus-visible, input:focus-visible, [tabindex="-1"]:focus-visible {
+      outline: 3px solid #000;
+      outline-offset: 2px;
+      box-shadow: 0 0 0 7px #fff;
+    }
+    [tabindex="-1"]:focus { outline: none; }
+    button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: var(--accent-dark); }
+    button.primary { background: var(--accent); color: #fff; border-color: var(--accent-dark); box-shadow: 3px 3px 0 var(--accent-dark); }
+    button.primary:hover { background: var(--accent-dark); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+    .spacer { flex: 1; }
+    .label { font-weight: bold; margin: 12px 0 4px; }
+    input[type="text"] {
+      width: 100%;
+      min-height: 48px;
+      padding: 6px 12px;
+      font: inherit;
+      border: 3px solid var(--ink);
+      border-radius: 8px;
+    }
+    .msg { min-height: 1.6em; margin: 8px 0 0; font-weight: bold; color: var(--accent-dark); }
+    ul.posts { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+    ul.posts li {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      background: #fff;
+      border: 2px solid var(--wood-dark);
+      border-radius: 8px;
+      padding: 8px 12px;
+    }
+    ul.posts .body { flex: 1; overflow-wrap: anywhere; }
+    .note { font-size: 18px; }
+
+    /* ブラウン管テレビ。木の枠、丸みのある画面、走査線を CSS で描く */
+    .tv {
+      background: var(--wood);
+      border: 6px solid var(--wood-dark);
+      border-radius: 24px;
+      padding: 20px;
+      box-shadow: var(--shadow);
+    }
+    .screen {
+      position: relative;
+      min-height: 320px;
+      padding: 24px;
+      color: #f3ecd2;
+      background: radial-gradient(ellipse at center, #3a4a3c 0%, #1b241d 100%);
+      border: 6px solid #111;
+      border-radius: 36px / 28px;
+      box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.8);
+      overflow: hidden;
+    }
+    .screen::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.18) 0 2px, transparent 2px 4px);
+    }
+    .screen .corner { font-size: 20px; color: #f2c75c; letter-spacing: 0.1em; margin: 0 0 8px; }
+    .screen .host { font-size: 26px; margin: 0 0 16px; overflow-wrap: anywhere; }
+    .ai-chip {
+      display: inline-block;
+      margin-right: 8px;
+      padding: 0 8px;
+      font-size: 18px;
+      font-weight: bold;
+      color: #1b241d;
+      background: #f2c75c;
+      border-radius: 6px;
+      vertical-align: middle;
+    }
+    .screen .post { border-top: 2px dashed #f3ecd2; padding-top: 12px; }
+    .screen .post .who { font-size: 20px; color: #9fd8a6; margin: 0; }
+    .screen .post .card { font-size: 30px; font-weight: bold; margin: 0; overflow-wrap: anywhere; }
+    .screen .post .text { font-size: 26px; margin: 4px 0 0; overflow-wrap: anywhere; }
+    .screen .fade { animation: fade-in 350ms ease-out; }
+    @keyframes fade-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { .screen .fade { animation: none; } }
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
-  <div class="cards">
-    <button class="card">場面1</button>
-    <button class="card">場面2</button>
-    <button class="card">場面3</button>
-  </div>
-  <script src="app.js"></script>
+  <header>
+    <h1>ちゃのま</h1>
+    <div class="row" id="roles" role="group" aria-label="だれが使いますか"></div>
+    <span class="spacer"></span>
+    <button id="evening" class="primary">夜7時にする</button>
+  </header>
+
+  <main>
+    <section id="post-view" class="panel" aria-labelledby="post-title">
+      <h2 id="post-title" tabindex="-1"></h2>
+      <p class="label" id="topics-label">きょうのお題</p>
+      <div class="row" id="topics" role="group" aria-labelledby="topics-label"></div>
+      <p class="label" id="cards-label">札をえらぶ</p>
+      <div class="row" id="cards" role="group" aria-labelledby="cards-label"></div>
+      <p class="label" id="headlines-label">見出し（えらばなくてもよい）</p>
+      <div class="row" id="headlines" role="group" aria-labelledby="headlines-label"></div>
+      <p class="label"><label for="text">ひとこと（書かなくてもよい）</label></p>
+      <input id="text" type="text" maxlength="200" autocomplete="off">
+      <div class="row" style="margin-top: 12px">
+        <button id="send" class="primary">おくる</button>
+      </div>
+      <p id="msg" class="msg" role="status"></p>
+    </section>
+
+    <section id="list-view" class="panel" aria-labelledby="list-title">
+      <div class="row">
+        <h2 id="list-title" tabindex="-1">きょうの投稿</h2>
+        <span class="spacer"></span>
+        <button id="clear">ぜんぶ消す</button>
+      </div>
+      <ul id="posts" class="posts"></ul>
+    </section>
+
+    <section id="tv-view" hidden aria-label="夜7時のかぞくニュース">
+      <div class="tv">
+        <div class="screen" id="screen" tabindex="-1" aria-live="polite"></div>
+        <div class="row" style="margin: 16px 0 0">
+          <button id="next" class="primary">つぎへ</button>
+          <button id="back">投稿にもどる</button>
+        </div>
+      </div>
+      <p class="note">つなぎの言葉は「AI」が付けました。みなさんの言葉は、そのまま出しています。</p>
+    </section>
+  </main>
+
+  <script type="module" src="app.js"></script>
 </body>
 </html>
