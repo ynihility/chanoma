@@ -1,12 +1,22 @@
 // server.mjs の動作テスト。偽の API サーバーを立て、本物の API にもクレジットにも触れずに確かめる。実行: node --test
 import http from 'node:http';
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 // リポジトリの場所（このファイルの1つ上）。どのパソコンでも動くように、固定の場所は書かない
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const FAKE_PORT = 9871;
-const APP_PORT = 9872;
+// 空いている番号を OS に選ばせる。番号を決め打ちにすると、ほかのテストや作業と同時に走ったときにぶつかるため
+async function freePort() {
+  const s = http.createServer();
+  await new Promise((r) => s.listen(0, '127.0.0.1', r));
+  const { port } = s.address();
+  await new Promise((r) => s.close(r));
+  return port;
+}
+const FAKE_PORT = await freePort();
+const APP_PORT = await freePort();
+const BANNER_PORT = await freePort();
 const FAKE_KEY = 'FAKE_TEST_KEY_NOT_A_REAL_KEY';
 
 const posts = [
@@ -89,6 +99,27 @@ function startApp(env) {
   });
 }
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+// サーバーが返事をするようになるまで待つ（最大10秒）。決まった時間だけ待つと、パソコンが混んでいるときに間に合わないため
+async function waitReady(timeoutMs = 10_000) {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${APP_PORT}/`);
+      await res.arrayBuffer();
+      return;
+    } catch {
+      await wait(100);
+    }
+  }
+  throw new Error(`サーバーが ${timeoutMs}ms 以内に起動しませんでした`);
+}
+// サーバーを止め、本当に終わってから次へ進む。止まりきる前に次を起動すると、古いサーバーに話しかけてしまうため
+async function stopApp(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const done = new Promise((r) => child.once('exit', r));
+  child.kill();
+  await done;
+}
 async function call(method, path, body, headers = { 'content-type': 'application/json' }) {
   const res = await fetch(`http://127.0.0.1:${APP_PORT}${path}`, {
     method, headers, body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),
@@ -111,7 +142,7 @@ let app = startApp({ ANTHROPIC_API_KEY: FAKE_KEY, CHANOMA_RATE_PER_MINUTE: '1000
 let appLog = '';
 app.stdout.on('data', (d) => (appLog += d));
 app.stderr.on('data', (d) => (appLog += d));
-await wait(800);
+await waitReady();
 
 // --- 正常系 ---
 fakeMode = 'good';
@@ -257,6 +288,21 @@ for (const p of ['/.env', '/server.mjs', '/prompt.txt', '/.git/config', '/../ser
 }
 r = await call('GET', '/');
 check('配る: / は index.html', r.status === 200 && r.text.includes('<'), String(r.status));
+// 画面が読み込む JS を index.html と import からたどり、すべて配られていることを確かめる。
+// サーバーの一覧（STATIC_FILES）への足し忘れで、演出などが黙って動かなくなるのを防ぐため
+const pageScripts = new Set();
+const toScan = ['index.html'];
+while (toScan.length > 0) {
+  const text = readFileSync(ROOT + toScan.shift(), 'utf8');
+  for (const m of text.matchAll(/(?:src=|from\s+|import\(\s*)["'](?:\.\/)?([\w-]+\.js)["']/g)) {
+    if (!pageScripts.has(m[1])) { pageScripts.add(m[1]); toScan.push(m[1]); }
+  }
+}
+check('配る: 画面が読み込む JS を見つけられる（app.js と effects.js を含む）', pageScripts.has('app.js') && pageScripts.has('effects.js'), [...pageScripts].join(','));
+for (const name of pageScripts) {
+  r = await call('GET', `/${name}`);
+  check(`配る: 画面が読み込む ${name} -> 200`, r.status === 200, `${r.status}`);
+}
 
 // --- レビューで指摘された防御 ---
 const raw = (method, path, headers, body) =>
@@ -316,14 +362,14 @@ for (const p of ['/fonts/', '/fonts/other.ttf', '/fonts/../server.mjs', '/fonts/
 async function startupBanner(env) {
   const child = spawn('node', ['server.mjs'], {
     cwd: ROOT,
-    env: { ...process.env, PORT: '9873', ANTHROPIC_API_KEY: FAKE_KEY, CHANOMA_API_BASE: '', ANTHROPIC_BASE_URL: '', ...env },
+    env: { ...process.env, PORT: String(BANNER_PORT), ANTHROPIC_API_KEY: FAKE_KEY, CHANOMA_API_BASE: '', ANTHROPIC_BASE_URL: '', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let out = '';
   child.stdout.on('data', (d) => (out += d));
-  await wait(1200);
-  child.kill();
-  await wait(200);
+  // 「送り先」の行が出るまで待つ（最大10秒）
+  for (let i = 0; i < 100 && !out.includes('送り先'); i++) await wait(100);
+  await stopApp(child);
   return out;
 }
 const ambient = await startupBanner({ ANTHROPIC_BASE_URL: 'http://127.0.0.1:9' });
@@ -333,15 +379,14 @@ check('CHANOMA_API_BASE を指定すると、テスト用の接続先だと表�
 
 // --- ログに APIキーが出ていない ---
 check('ログに APIキーの値が出ていない', !appLog.includes(FAKE_KEY));
-app.kill();
-await wait(300);
+await stopApp(app);
 
 // --- 時間あたりの呼び出し上限 ---
 // 1分あたり3回・1日あたり5回に絞って起動する。偽の API なので、本物の料金はかからない
 fakeMode = 'good';
 const fakeCallsBefore = fakeCalls;
 app = startApp({ ANTHROPIC_API_KEY: FAKE_KEY, CHANOMA_RATE_PER_MINUTE: '3', CHANOMA_RATE_PER_DAY: '5' });
-await wait(800);
+await waitReady();
 const minuteCodes = [];
 for (let i = 0; i < 4; i++) minuteCodes.push((await call('POST', '/api/news', { posts })).status);
 check('1分あたりの上限: 3回は 200、4回目は 429', minuteCodes.join(',') === '200,200,200,429', minuteCodes.join(','));
@@ -352,27 +397,24 @@ r = await call('POST', '/api/news', { posts: [] });
 check('上限に達したあとでも、入力の検査が先に動いて 400 を返す', r.status === 400, `${r.status}`);
 r = await call('GET', '/');
 check('画面のファイルの配信は、上限の対象外', r.status === 200, `${r.status}`);
-app.kill();
-await wait(300);
+await stopApp(app);
 
 // 1日の上限: 1分の上限を大きくして、1日の5回だけで止まることを確かめる
 app = startApp({ ANTHROPIC_API_KEY: FAKE_KEY, CHANOMA_RATE_PER_MINUTE: '100', CHANOMA_RATE_PER_DAY: '5' });
-await wait(800);
+await waitReady();
 const dayCodes = [];
 for (let i = 0; i < 6; i++) dayCodes.push((await call('POST', '/api/news', { posts })).status);
 check('1日あたりの上限: 5回は 200、6回目は 429', dayCodes.join(',') === '200,200,200,200,200,429', dayCodes.join(','));
-app.kill();
-await wait(300);
+await stopApp(app);
 
 // 作り直しも回数に数える: 1分1回にすると、1回目で上限に届き、作り直しは頼まない
 fakeMode = 'bad-inject';
 app = startApp({ ANTHROPIC_API_KEY: FAKE_KEY, CHANOMA_RATE_PER_MINUTE: '1', CHANOMA_RATE_PER_DAY: '100' });
-await wait(800);
+await waitReady();
 callsFrom = fakeCalls;
 r = await call('POST', '/api/news', { posts });
 check('作り直しも回数に数え、上限なら頼まない（問い合わせ1回、502）', r.status === 502 && fakeCalls - callsFrom === 1, `${r.status} 問い合わせ ${fakeCalls - callsFrom} 回`);
-app.kill();
-await wait(300);
+await stopApp(app);
 
 // --- キー未設定 ---
 // 1分あたりの上限を3にして起動する。キーが無いまま送り続けても、回数の枠を使わないので、429 に変わらず 500 のまま
@@ -383,13 +425,13 @@ app = spawn('node', ['server.mjs'], {
   env: { ...noKeyEnv, PORT: String(APP_PORT), CHANOMA_API_BASE: `http://127.0.0.1:${FAKE_PORT}`, CHANOMA_RATE_PER_MINUTE: '3' },
   stdio: 'ignore',
 });
-await wait(800);
+await waitReady();
 r = await call('POST', '/api/news', { posts });
 check('キー未設定 -> 500 で内部情報を出さない', r.status === 500 && !/ANTHROPIC|環境変数/.test(r.text), r.text);
 const noKeyCodes = [r.status];
 for (let i = 0; i < 3; i++) noKeyCodes.push((await call('POST', '/api/news', { posts })).status);
 check('キー未設定: 1分あたりの上限を3にして4回送っても、4回とも 500（429 にならない）', noKeyCodes.join(',') === '500,500,500,500', noKeyCodes.join(','));
-app.kill();
+await stopApp(app);
 fake.close();
 console.log(`\n結果: PASS ${pass} / FAIL ${fail}`);
 process.exit(fail ? 1 : 0);
