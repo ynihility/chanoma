@@ -34,8 +34,13 @@ let loadNote = '';
 try {
   const raw = localStorage.getItem(STORAGE_KEY);
   const saved = loadState(raw);
-  if (saved) state = saved;
-  else if (raw !== null) loadNote = '保存していた投稿を読み込めませんでした。新しく始めます。';
+  if (saved) {
+    state = saved;
+    // よびかただけ壊れていたときは、投稿は残して、はじめの名前に戻したと知らせる
+    if (!saved.roles && JSON.parse(raw).roles !== undefined) loadNote = 'よびかたを読み込めなかったので、はじめの名前に戻しました。';
+  } else if (raw !== null) {
+    loadNote = '保存していた投稿を読み込めませんでした。新しく始めます。';
+  }
 } catch {
   // 保存が使えない環境でも、画面は動かす
 }
@@ -50,7 +55,8 @@ const keep = () => ({
 let role = roles()[0];
 const pick ={ topic: '', card: '', headline: '' };
 // キャラ（どうぶつ）とニックネームは、よびかたごとに覚える。前に投稿していれば、その内容を引き継ぐ
-const profiles = {};
+// 名前を「__proto__」などにされても全体が汚染されないよう、土台のない入れ物にする
+const profiles = Object.create(null);
 for (const p of state.posts) profiles[p.who] = { animal: p.animal ?? '', nick: p.name ?? '' };
 const profile = () => (profiles[role] ??= { animal: '', nick: '' });
 // 放送中の状態。steps は順に映す内容、index は今の位置
@@ -157,12 +163,16 @@ function renderRoles() {
 function renameRole() {
   const name = $('rename').value.trim();
   const old = role;
-  if (name === old) return;
+  if (name === old) {
+    $('rename').value = old;
+    say('');
+    return;
+  }
   const checked = cleanRoles(roles().map((r) => (r === old ? name : r)));
   if (!checked.ok) {
+    // 打ち直さなくてよいように、入力した文字は消さない
     play('error');
     say(checked.error);
-    $('rename').value = old;
     return;
   }
   state = { ...state, roles: checked.roles, posts: state.posts.map((p) => (p.who === old ? { ...p, who: name } : p)) };
@@ -361,7 +371,7 @@ function showError(message) {
 async function goEvening() {
   cancelVoice();
   if (state.posts.length === 0) {
-    say('まだ投稿がありません。ひとことを、おくってください。');
+    say('まだ投稿がありません。');
     return;
   }
   const button = $('evening');

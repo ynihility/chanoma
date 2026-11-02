@@ -273,8 +273,7 @@ for (const h of [
   '皆様、こんばんは。', 'お客様、ようこそ。', '今日は一日、おつかれさまでした。', 'チャンネルは変えないでね。'.replace('ね', ''),
   'ゆきちゃんのお話です。', 'ゆきのお話です。', 'ねこさんのお話です。', 'たなかさんのお話です。', 'おとーさんのお話です。',
   'ちゃんと聞きましょう。', 'そして、ちゃんと聞きましょう。', '一番星のお話です。', '一番乗りのお話です。',
-  'お話を教えてくれました。', '静寂の朝のお話です。', '三日月がきれいでした。', '残りの煮物のお話です。', '二日目のお話です。',
-  '11月20日のお話です。',
+  'お話を教えてくれました。', '静寂の朝のお話です。', '三日月がきれいでした。', '残りの煮物のお話です。',
 ]) {
   test(`通す(再レビュー): 「${h}」`, () => {
     const r = checkNews(named(h), namePosts);
@@ -379,4 +378,34 @@ test('loadState: よびかたが壊れていても、投稿は捨てない', () 
   const s = loadState(raw);
   assert.equal(s.posts.length, 1);
   assert.equal('roles' in s, false);
+});
+
+// ---- 日付・曜日はつなぎの言葉で言わせない／よびかたの重なり ----
+for (const h of ['11月20日に会いたいそうです。', '金曜日に会いたいそうです。', '20日のお話です。', '十一月のお話です。', '来週のお話です。', '二日目のお話です。', '来月のお話です。', '日曜のお話です。']) {
+  test(`弾く(日付): 「${h}」`, () => assert.equal(checkNews(named(h), namePosts).ok, false, `通ってしまった: ${h}`));
+}
+for (const h of ['また明日、お会いしましょう。', '今日は一日、おつかれさまでした。', '三日月がきれいでした。', '日曜大工のお話です。'.replace('日曜大工', '大工')]) {
+  test(`通す(日付): 「${h}」`, () => {
+    const r = checkNews(named('次の話です。', h), namePosts);
+    assert.equal(r.ok, true, r.reason);
+  });
+}
+test('cleanRoles: 表記ゆれで同じ名前に見えるものは重なりとして弾き、どの名前か教える', () => {
+  for (const dup of [['お母さん', 'おかあさん'], ['ABC', 'ＡＢＣ'], ['ばあば', 'バアバ']]) {
+    const r = cleanRoles([...dup, 'c', 'd', 'e']);
+    assert.equal(r.ok, false, dup.join('/'));
+    assert.match(r.error, new RegExp(dup[0]));
+  }
+});
+test('cleanRoles: __proto__ という名前でも、結果が壊れたり全体が汚染されたりしない', () => {
+  const r = cleanRoles(['__proto__', 'b', 'c', 'd', 'e']);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.roles, ['__proto__', 'b', 'c', 'd', 'e']);
+  assert.equal({}.polluted, undefined);
+});
+test('checkNews: 好きな名前（ママ）の人を、投稿にないよびかた（ぱぱ・おばちゃん）で呼べない', () => {
+  const ps = [{ id: 'a', who: 'ママ', topic: 'そら' }];
+  const n = (host) => ({ opening: 'こんばんは。', segments: [{ corner: 'ひとこと', from: 'a', host }], closing: 'おやすみなさい。' });
+  assert.equal(checkNews(n('ママのお話です。'), ps).ok, true);
+  for (const h of ['ぱぱのお話です。', 'おばちゃんのお話です。', 'おじちゃんのお話です。']) assert.equal(checkNews(n(h), ps).ok, false, h);
 });

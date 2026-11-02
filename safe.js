@@ -145,7 +145,13 @@ export function cleanRoles(input) {
       if (!name) fail('よびかたを空にはできません。');
       return name;
     });
-    if (new Set(roles).size !== roles.length) fail('同じよびかたが重なっています。ちがう名前にしてください。');
+    // 「お母さん」と「おかあさん」、「ABC」と「ＡＢＣ」のような表記ゆれも、同じ名前として扱う
+    const seen = new Map();
+    for (const r of roles) {
+      const key = fold(r);
+      if (seen.has(key)) fail(`「${seen.get(key)}」と「${r}」は、同じ名前に見えます。ちがう名前にしてください。`);
+      seen.set(key, r);
+    }
     return { ok: true, roles };
   } catch (e) {
     if (e instanceof Invalid) return { ok: false, error: e.message };
@@ -202,6 +208,7 @@ const FAMILY = foldAll([
   'おとうちゃん', 'おにいちゃん', 'おねえちゃん', 'おにいさん', 'おねえさん', 'おじさん', 'おばさん',
   'ばあちゃん', 'じいちゃん', 'ばあさん', 'じいさん', 'ばあば', 'じいじ', 'かあさん', 'とうさん',
   'おふくろ', 'おやじ', 'まご', 'むすこ', 'むすめ', 'おとうと', 'いもうと',
+  'おばちゃん', 'おじちゃん', 'ぱぱ', 'ひいばあば', 'ひいじいじ', 'ひいばあちゃん', 'ひいじいちゃん',
 ]).sort((a, b) => b.length - a.length);
 // 「まご」を含むふつうの言葉。家族のよびかたとは数えない
 const FAMILY_BENIGN = foldAll(['たまご', 'まごころ', 'まごまご', 'まごつ']);
@@ -252,6 +259,9 @@ const URGING_PATTERN = /まだ[^。！？]{0,12}ません/;
 const MARKUP = /[<>`*#_~|[\]{}\\^]|:\/\/|https?:|www\.|javascript:|&[#a-z0-9]+;|\p{Extended_Pictographic}|\p{Regional_Indicator}|[★☆♪♫♬♡♥◎◆◇■□●○※〒✿]|[a-z0-9-]+\.(com|jp|net|org|io)\b/iu;
 // 残り日数を言わせない（日数は画面が出す）。「一日」「三日月」のようなふつうの言葉は当てない
 const DAYS_PATTERN = /(あと|のこり|残り|もう)[0-9一二三四五六七八九十百]+(日|にち|週|か月|ヶ月|ヵ月|かげつ)|[0-9一二三四五六七八九十百]+(日|にち|週間|か月|ヶ月|ヵ月|かげつ)(後|ご|前|まえ|ほど|で会|で逢)|(あと|のこり|残り)(なん|何|いく)(日|にち|週)/;
+// 日付・月・曜日・「来週」などは、画面が出すので、つなぎの言葉では言わせない（言い間違えると画面の日付と食い違うため）。
+// 「一日」「三日月」や、「また明日」は日常の言い方なので当てない
+const DATE_PATTERN_WORDS = /[0-9二三四五六七八九十百]+日(?![中月])|[0-9一二三四五六七八九十]+月|[月火水木金土日]曜|曜日|来週|再来週|来月|来年/;
 // 区切りの記号や結合文字を挟んで禁止語を分断する細工（「健、康」など）に備え、これらを除いた形でも調べる
 const SPLITTERS = /[\p{P}\p{S}\p{M}͏ᅟᅠㅤ⠀]/gu;
 const QUOTE_LEN = 8;
@@ -293,6 +303,7 @@ function wordProblem(s, ctx) {
   const urging = removeAll(g, URGING_BENIGN);
   if (URGING_WORDS.some((w) => urging.includes(w)) || URGING_PATTERN.test(f)) return '催促や返事を求める言葉がある';
   if (DAYS_PATTERN.test(g)) return '残り日数を言っている';
+  if (DATE_PATTERN_WORDS.test(g)) return '日付や曜日を言っている';
 
   // 家族のよびかたは、投稿の「よびかた・ニックネーム」に出ているものだけ許す（本文に出てくるだけでは許さない）
   let rest = removeAll(g, FAMILY_BENIGN);
