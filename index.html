@@ -7,144 +7,616 @@
   <!-- 自分のサーバーのスクリプトだけを動かす。万一 HTML が紛れ込んでも、外へ送ったり別のスクリプトを動かしたりできない -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'">
   <style>
+    /* ===== 色・文字・寸法の決まり（spec.md と同じ値） ===== */
     :root {
-      --wood: #8a5a34;
-      --wood-dark: #5b3820;
-      --tatami: #c9bd7e;
-      --paper: #fff6e0;
-      --ink: #2b1b10;
-      /* 白い文字との比が 4.5 以上になる濃さ（5.58）。高齢の人にも読みやすいように */
-      --accent: #b83f19;
-      --accent-dark: #8f2f10;
-      --shadow: 4px 4px 0 rgba(43, 27, 16, 0.55);
+      /* 色。輪郭と文字は黒ではなく濃い茶で統一する */
+      --ink: #2A1810;        /* 輪郭・文字 */
+      --shade: #4A2E1E;      /* 影・補足文 */
+      --wood: #6B3F26;       /* 木・濃（文字は置かない） */
+      --wood-light: #A8693A; /* 木・明（装飾だけ） */
+      --tatami: #8E9650;     /* 畳・濃 */
+      --tatami-light: #B9B872;
+      --wall: #D9B98A;       /* 壁・ボタンの hover */
+      --paper: #F3E9D2;      /* 紙。文字を置く面 */
+      --field: #FFFBF2;      /* 入力欄の地 */
+      --shu: #C8402A;        /* 朱（装飾） */
+      --shu-text: #B03020;   /* 朱（文字と、文字を載せる地） */
+      --shu-dark: #8E2418;   /* 朱の押したとき */
+      --asagi: #7FB8A5;      /* 浅葱（家電の差し色） */
+      --asagi-text: #96CDB9; /* 浅葱（ブラウン管の上の文字。走査線で暗くなっても 4.5 以上） */
+      --yamabuki: #F0B31C;   /* 山吹 */
+      --crt-light: #BFE8D0;  /* ブラウン管の光（字幕） */
+      --crt: #10211A;        /* ブラウン管の地 */
+      --crt-mid: #1A3328;    /* ブラウン管の中央 */
+
+      /* 文字。いまは端末にあるフォントだけで組む */
+      --font-head: "Yu Gothic UI", "Hiragino Sans", "Noto Sans JP", "Meiryo", sans-serif;
+      --font-body: "BIZ UDPGothic", "Yu Gothic UI", "Hiragino Sans", "Noto Sans JP", "Meiryo", sans-serif;
+      --font-dot: "MS Gothic", "Osaka-Mono", monospace;
+
+      /* 余白と角 */
+      --gap-1: 4px;
+      --gap-2: 8px;
+      --gap-3: 12px;
+      --gap-4: 16px;
+      --gap-5: 24px;
+      --gap-6: 32px;
+      --radius-field: 6px;
+      --radius-button: 12px;
+      --radius-panel: 20px;
+
+      /* 影はぼかさず、右下にずらすだけ */
+      --drop: 4px 4px 0 var(--shade);
     }
+
+    /* ===== 同梱フォント版（いまは使わない） =====
+       本人の許可が出たら、このコメントを外して fonts/ に woff2 を置く。
+       あわせて CSP に font-src 'self' を足し、server.mjs の配ってよいファイルにも加える必要がある。
+    @font-face { font-family: "Reggae One"; src: url("fonts/ReggaeOne-Regular.woff2") format("woff2"); font-display: swap; }
+    @font-face { font-family: "BIZ UDPGothic"; src: url("fonts/BIZUDPGothic-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+    @font-face { font-family: "BIZ UDPGothic"; src: url("fonts/BIZUDPGothic-Bold.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+    @font-face { font-family: "DotGothic16"; src: url("fonts/DotGothic16-Regular.woff2") format("woff2"); font-display: swap; }
+    :root {
+      --font-head: "Reggae One", "Yu Gothic UI", "Hiragino Sans", sans-serif;
+      --font-body: "BIZ UDPGothic", "Yu Gothic UI", "Hiragino Sans", sans-serif;
+      --font-dot: "DotGothic16", "MS Gothic", monospace;
+    }
+    ===== ここまで ===== */
+
     * { box-sizing: border-box; }
     body {
       margin: 0;
       min-height: 100vh;
       color: var(--ink);
-      font-family: "BIZ UDPGothic", "Hiragino Maru Gothic ProN", "Yu Gothic UI", "Meiryo", sans-serif;
+      font-family: var(--font-body);
       font-size: 20px;
-      line-height: 1.6;
-      /* 畳のような縞。画像は使わず CSS だけで描く */
+      line-height: 1.7;
+      /* 畳。い草の細い目と、画面の左右の畳の縁（へり）を CSS だけで描く。文字はこの上に直接置かない */
       background:
-        repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.06) 0 2px, transparent 2px 120px),
-        var(--tatami);
+        linear-gradient(90deg, var(--shade) 0 12px, transparent 12px calc(100% - 12px), var(--shade) calc(100% - 12px)),
+        repeating-linear-gradient(90deg, rgba(142, 150, 80, 0.45) 0 2px, transparent 2px 5px),
+        var(--tatami-light);
+      background-attachment: fixed;
     }
+
+    /* ===== 鴨居（かもい）と看板 ===== */
     header {
-      background: var(--wood);
-      border-bottom: 6px solid var(--wood-dark);
-      padding: 12px 16px;
+      position: relative;
       display: flex;
       flex-wrap: wrap;
-      gap: 12px;
+      gap: var(--gap-3);
       align-items: center;
+      padding: var(--gap-4) var(--gap-4) var(--gap-5);
+      /* 木目。文字はこの上に直接置かず、看板やボタン（紙の面）の上に置く */
+      background:
+        repeating-linear-gradient(180deg, rgba(168, 105, 58, 0.35) 0 2px, transparent 2px 9px, rgba(74, 46, 30, 0.35) 9px 10px, transparent 10px 17px),
+        var(--wood);
+      border-bottom: 8px solid var(--shade);
+      box-shadow: 0 4px 0 var(--ink);
     }
-    h1 { margin: 0; font-size: 28px; color: var(--paper); text-shadow: 2px 2px 0 var(--wood-dark); }
-    h2 { margin: 0 0 8px; font-size: 22px; }
-    main { max-width: 860px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
-    .panel {
-      background: var(--paper);
-      border: 4px solid var(--wood-dark);
-      border-radius: 8px;
-      padding: 16px;
-      box-shadow: var(--shadow);
-    }
-    button {
-      font: inherit;
-      min-height: 48px;
-      padding: 6px 16px;
+    /* 看板「ちゃのま」: 紙の板を木枠で囲み、右下に朱の印を押す */
+    h1 {
+      position: relative;
+      margin: 0 var(--gap-2) 0 0;
+      padding: var(--gap-1) var(--gap-5) var(--gap-1) var(--gap-4);
+      font-family: var(--font-head);
+      font-size: 40px;
+      font-weight: 800;
+      line-height: 1.3;
+      letter-spacing: 0.2em;
       color: var(--ink);
-      background: #fff;
-      border: 3px solid var(--ink);
-      border-radius: 8px;
-      cursor: pointer;
+      background: var(--paper);
+      border: 4px solid var(--ink);
+      border-radius: 4px;
+      box-shadow: 0 0 0 5px var(--wood-light), 0 0 0 8px var(--ink), 6px 8px 0 8px var(--shade);
     }
-    button:hover { background: #ffe9b8; }
-    /* 黒と白の二重の枠。木の色、畳の色、パネルのどの上でも見える */
+    /* 朱の印（文字は入れない。四角い枠だけ） */
+    h1::after {
+      content: "";
+      position: absolute;
+      right: -14px;
+      bottom: -14px;
+      width: 26px;
+      height: 26px;
+      background: var(--shu);
+      border: 3px solid var(--ink);
+      box-shadow: inset 0 0 0 3px var(--shu), inset 0 0 0 5px var(--paper);
+      transform: rotate(-8deg);
+    }
+    .spacer { flex: 1; }
+
+    /* 障子の帯。格子は木・明、紙は紙色。飾りなので読み上げない */
+    .shoji {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: var(--gap-4);
+      min-height: 84px;
+      padding: var(--gap-2) var(--gap-5) 0;
+      background:
+        repeating-linear-gradient(90deg, var(--wood-light) 0 4px, transparent 4px 64px),
+        repeating-linear-gradient(180deg, var(--wood-light) 0 4px, transparent 4px 28px),
+        var(--paper);
+      border-bottom: 10px solid var(--wood);
+      box-shadow: inset 0 6px 0 rgba(74, 46, 30, 0.25);
+    }
+    .shoji .shelf { display: flex; align-items: flex-end; gap: var(--gap-3); }
+    .sprite {
+      display: block;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+
+    /* ===== ボタン: 座布団 ===== */
+    button {
+      position: relative;
+      font: inherit;
+      font-weight: 700;
+      min-height: 56px;
+      padding: var(--gap-2) var(--gap-4);
+      color: var(--ink);
+      background: var(--paper);
+      border: 3px solid var(--ink);
+      border-radius: var(--radius-button);
+      /* 縫い目の線（内側）と、座布団の厚み（下の影） */
+      box-shadow: inset 0 0 0 3px var(--paper), inset 0 0 0 5px var(--wood-light), 0 5px 0 var(--shade);
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    @media (hover: hover) {
+      button:hover { background: var(--wall); box-shadow: inset 0 0 0 3px var(--wall), inset 0 0 0 5px var(--wood), 0 5px 0 var(--shade); }
+    }
+    button:active { transform: translateY(3px); box-shadow: inset 0 0 0 3px var(--paper), inset 0 0 0 5px var(--wood-light), 0 2px 0 var(--shade); }
+    /* 選ばれている座布団: 朱の地に紙の文字。色だけに頼らず、山吹のひし形の印も付ける */
+    button[aria-pressed="true"] {
+      color: var(--paper);
+      background: var(--shu-text);
+      border-color: var(--ink);
+      box-shadow: inset 0 0 0 3px var(--shu-text), inset 0 0 0 5px var(--yamabuki), 0 2px 0 var(--shade);
+      transform: translateY(3px);
+    }
+    button[aria-pressed] { padding-left: 40px; }
+    button[aria-pressed]::before {
+      content: "";
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      width: 12px;
+      height: 12px;
+      margin-top: -6px;
+      background: transparent;
+      border: 2px solid var(--ink);
+      transform: rotate(45deg);
+    }
+    button[aria-pressed="true"]::before { background: var(--yamabuki); }
+    @media (hover: hover) {
+      button[aria-pressed="true"]:hover { background: var(--shu-dark); box-shadow: inset 0 0 0 3px var(--shu-dark), inset 0 0 0 5px var(--yamabuki), 0 2px 0 var(--shade); }
+    }
+    /* 黒と白の二重の枠。白・黒・白の順に重なるので、木の色、畳、紙、どの上でも見える */
+    /* 押せないときも色は薄くしない（読めなくなるため）。点線の枠と待ちのカーソルで伝える */
+    button:disabled { cursor: wait; border-style: dashed; transform: none; }
+
+    /* 動物を選ぶ座布団: 絵の下に名前 */
+    button.animal {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--gap-1);
+      min-width: 104px;
+      padding-top: var(--gap-3);
+      padding-bottom: var(--gap-2);
+    }
+
+    /* 朱印の「おくる」と、放送の「つぎへ」 */
+    button.primary {
+      min-height: 64px;
+      min-width: 168px;
+      padding: var(--gap-2) var(--gap-6);
+      font-size: 24px;
+      letter-spacing: 0.15em;
+      color: var(--paper);
+      background: var(--shu-text);
+      border: 4px solid var(--ink);
+      border-radius: 10px;
+      /* 印の内側の細い紙色の線と、下の厚み */
+      box-shadow: inset 0 0 0 4px var(--shu-text), inset 0 0 0 6px var(--paper), 0 6px 0 var(--shu-dark), 0 6px 0 3px var(--ink);
+    }
+    @media (hover: hover) {
+      button.primary:hover { background: var(--shu-dark); box-shadow: inset 0 0 0 4px var(--shu-dark), inset 0 0 0 6px var(--paper), 0 6px 0 var(--shu-dark), 0 6px 0 3px var(--ink); }
+    }
+    button.primary:active { transform: translateY(4px); box-shadow: inset 0 0 0 4px var(--shu-text), inset 0 0 0 6px var(--paper), 0 2px 0 var(--shu-dark), 0 2px 0 3px var(--ink); }
+
+    /* 柱時計の「夜7時にする」: 上が丸い木の箱に、紙の文字盤。左に7時を指す小さな時計 */
+    #evening {
+      min-height: 72px;
+      padding: var(--gap-2) var(--gap-5) var(--gap-2) 68px;
+      font-size: 22px;
+      letter-spacing: 0.05em;
+      color: var(--ink);
+      background: var(--paper);
+      border: 4px solid var(--ink);
+      border-radius: 36px 36px 10px 10px;
+      box-shadow: 0 0 0 6px var(--wood-light), 0 0 0 9px var(--ink), 0 8px 0 9px var(--shade);
+    }
+    @media (hover: hover) {
+      #evening:hover { background: var(--wall); }
+    }
+    #evening:active { transform: translateY(3px); box-shadow: 0 0 0 6px var(--wood-light), 0 0 0 9px var(--ink), 0 5px 0 9px var(--shade); }
+    /* 文字盤 */
+    #evening::before {
+      content: "";
+      position: absolute;
+      left: 16px;
+      top: 50%;
+      width: 38px;
+      height: 38px;
+      margin-top: -19px;
+      border: 3px solid var(--ink);
+      border-radius: 50%;
+      /* 長針（12の方向） */
+      background: linear-gradient(var(--ink), var(--ink)) 50% 4px / 3px 14px no-repeat, var(--field);
+    }
+    /* 短針（下向きの棒を時計回りに30度 = 7の方向） */
+    #evening::after {
+      content: "";
+      position: absolute;
+      left: 34px;
+      top: 50%;
+      width: 3px;
+      height: 11px;
+      background: var(--shu-text);
+      transform-origin: 50% 0;
+      transform: rotate(30deg);
+    }
+    /* 黒と白の二重の枠。白・黒・白の順に重なるので、木の色、畳、紙、どの上でも見える。
+       ボタンごとの影の指定より必ず勝つように !important を付ける */
     button:focus-visible, input:focus-visible, [tabindex="-1"]:focus-visible {
-      outline: 3px solid #000;
-      outline-offset: 2px;
-      box-shadow: 0 0 0 7px #fff;
+      outline: 3px solid #000 !important;
+      outline-offset: 3px;
+      box-shadow: 0 0 0 9px #FFFFFF !important;
     }
     [tabindex="-1"]:focus { outline: none; }
-    button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: var(--accent-dark); }
-    button.primary { background: var(--accent); color: #fff; border-color: var(--accent-dark); box-shadow: 3px 3px 0 var(--accent-dark); }
-    button.primary:hover { background: var(--accent-dark); }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
-    .spacer { flex: 1; }
-    .label { font-weight: bold; margin: 12px 0 4px; }
+
+    /* ===== 中身の並び ===== */
+    main {
+      max-width: 880px;
+      margin: 0 auto;
+      padding: var(--gap-6) var(--gap-4) 64px;
+      display: grid;
+      gap: 56px;
+    }
+    .row { display: flex; flex-wrap: wrap; gap: var(--gap-3); margin-bottom: var(--gap-2); }
+
+    /* 紙の面。外側の太い木の枠はちゃぶ台のふち */
+    .panel {
+      position: relative;
+      background: var(--paper);
+      border: 10px solid var(--wood);
+      border-radius: var(--radius-panel);
+      padding: var(--gap-5);
+      box-shadow: inset 0 0 0 3px var(--wood-light), 0 8px 0 var(--shade), 0 8px 0 3px var(--ink);
+    }
+    h2 {
+      margin: 0 0 var(--gap-3);
+      font-family: var(--font-head);
+      font-size: 28px;
+      font-weight: 800;
+      line-height: 1.4;
+      letter-spacing: 0.05em;
+    }
+    /* 見出しの下の、新聞のような二重線 */
+    #post-title, #list-title { padding-bottom: var(--gap-1); border-bottom: 5px double var(--ink); }
+    .label { font-weight: 700; font-size: 21px; margin: var(--gap-5) 0 var(--gap-2); }
+    /* ラベルの頭の小さな山吹の四角（飾り。文字とは重ならない） */
+    .label::before {
+      content: "";
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      margin-right: 10px;
+      vertical-align: 0.1em;
+      background: var(--yamabuki);
+      border: 2px solid var(--ink);
+    }
+    .note { font-size: 20px; color: var(--shade); margin: var(--gap-2) 0; }
+    .msg { min-height: 1.7em; margin: var(--gap-3) 0 0; font-weight: 700; color: var(--shu-text); }
+
     input[type="text"], input[type="date"] {
       width: 100%;
-      max-width: 420px;
-      min-height: 48px;
-      padding: 6px 12px;
+      max-width: 440px;
+      min-height: 56px;
+      padding: var(--gap-2) var(--gap-3);
       font: inherit;
+      color: var(--ink);
+      background: var(--field);
       border: 3px solid var(--ink);
-      border-radius: 8px;
+      border-radius: var(--radius-field);
+      box-shadow: inset 3px 3px 0 rgba(74, 46, 30, 0.18);
     }
-    .msg { min-height: 1.6em; margin: 8px 0 0; font-weight: bold; color: var(--accent-dark); }
-    ul.posts { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+    #text { max-width: none; }
+
+    /* 投稿の画面: ちゃぶ台。下に脚を2本描く（パネルの外なので文字とは重ならない） */
+    #post-view { margin-bottom: 24px; }
+    #post-view::after {
+      content: "";
+      position: absolute;
+      left: 12%;
+      right: 12%;
+      bottom: -48px;
+      height: 38px;
+      /* 上が木の脚、下が輪郭の濃茶（右下に少しはみ出して影になる） */
+      background:
+        linear-gradient(var(--wood), var(--wood)) left 3px top 0 / 26px 32px no-repeat,
+        linear-gradient(var(--wood), var(--wood)) right 3px top 0 / 26px 32px no-repeat,
+        linear-gradient(var(--ink), var(--ink)) left 0 top 0 / 32px 38px no-repeat,
+        linear-gradient(var(--ink), var(--ink)) right 0 top 0 / 32px 38px no-repeat;
+    }
+
+    /* つぎに会う日: 日めくりの暦。上の朱の帯に、つり下げの穴を2つ */
+    #date-view { border-top-width: 34px; border-top-color: var(--shu); }
+    #date-view .rings {
+      position: absolute;
+      top: -26px;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: center;
+      gap: 120px;
+    }
+    #date-view .rings span {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--tatami-light);
+      border: 3px solid var(--ink);
+    }
+
+    /* きょうの投稿: 新聞の紙面。1件ずつ短冊の紙 */
+    ul.posts { list-style: none; margin: var(--gap-3) 0 0; padding: 0; display: grid; gap: var(--gap-3); }
     ul.posts li {
       display: flex;
-      gap: 8px;
+      gap: var(--gap-3);
       align-items: center;
-      background: #fff;
-      border: 2px solid var(--wood-dark);
-      border-radius: 8px;
-      padding: 8px 12px;
+      min-height: 72px;
+      padding: var(--gap-2) var(--gap-3);
+      background: var(--field);
+      border: 2px solid var(--ink);
+      border-left: 10px solid var(--wood-light);
+      border-radius: 4px;
+      box-shadow: 3px 3px 0 var(--wall);
     }
     ul.posts .body { flex: 1; overflow-wrap: anywhere; }
-    .note { font-size: 18px; }
+    ul.posts li .sprite { flex: none; }
+    ul.posts li button { min-height: 56px; }
 
-    /* ブラウン管テレビ。木の枠、丸みのある画面、走査線を CSS で描く */
-    .tv {
-      background: var(--wood);
-      border: 6px solid var(--wood-dark);
-      border-radius: 24px;
-      padding: 20px;
-      box-shadow: var(--shadow);
+    /* ===== ブラウン管テレビ ===== */
+    #tv-view { position: relative; padding-top: 72px; }
+    /* 室内アンテナ（V字の2本と台） */
+    .antenna {
+      position: absolute;
+      top: 0;
+      left: 50%;
+      width: 200px;
+      height: 84px;
+      margin-left: -100px;
     }
+    .antenna::before, .antenna::after {
+      content: "";
+      position: absolute;
+      bottom: 12px;
+      left: 98px;
+      width: 5px;
+      height: 92px;
+      background: var(--ink);
+      border-radius: 3px;
+      transform-origin: 50% 100%;
+    }
+    .antenna::before { transform: rotate(-32deg); }
+    .antenna::after { transform: rotate(32deg); }
+    .antenna span {
+      position: absolute;
+      bottom: 0;
+      left: 70px;
+      width: 60px;
+      height: 20px;
+      background: var(--wood);
+      border: 3px solid var(--ink);
+      border-radius: 30px 30px 4px 4px;
+      z-index: 1;
+    }
+    .tv {
+      position: relative;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: var(--gap-4);
+      padding: var(--gap-5);
+      background:
+        repeating-linear-gradient(90deg, rgba(168, 105, 58, 0.35) 0 3px, transparent 3px 11px, rgba(42, 24, 16, 0.25) 11px 12px, transparent 12px 23px),
+        var(--wood);
+      border: 5px solid var(--ink);
+      border-radius: 32px;
+      box-shadow: inset 0 0 0 4px var(--wood-light), 0 10px 0 var(--shade), 0 10px 0 4px var(--ink);
+    }
+    .tv > .row { grid-column: 1 / -1; margin: var(--gap-2) 0 0; }
+    /* 画面: 角の丸いブラウン管。ふちは濃く、中央は少し明るい */
     .screen {
       position: relative;
-      min-height: 320px;
-      padding: 24px;
-      color: #f3ecd2;
-      background: radial-gradient(ellipse at center, #3a4a3c 0%, #1b241d 100%);
-      border: 6px solid #111;
-      border-radius: 36px / 28px;
-      box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.8);
+      min-height: 360px;
+      padding: var(--gap-6) 40px;
+      color: var(--crt-light);
+      font-family: var(--font-body);
+      background: radial-gradient(ellipse at 50% 45%, var(--crt-mid) 0%, var(--crt) 75%);
+      border: 8px solid var(--ink);
+      border-radius: 48px / 40px;
+      box-shadow: 0 0 0 4px var(--shade), inset 0 0 50px rgba(0, 0, 0, 0.55);
       overflow: hidden;
     }
+    /* 走査線（3ドットおき、不透明度 12%）。文字の上に薄くかかるが、暗くなる分も含めて比を計算済み */
     .screen::after {
       content: "";
       position: absolute;
       inset: 0;
       pointer-events: none;
-      background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.18) 0 2px, transparent 2px 4px);
+      background: repeating-linear-gradient(180deg, rgba(0, 0, 0, 0.12) 0 1px, transparent 1px 3px);
     }
-    .screen .corner { font-size: 20px; color: #f2c75c; letter-spacing: 0.1em; margin: 0 0 8px; }
-    .screen .host { font-size: 26px; margin: 0 0 16px; overflow-wrap: anywhere; }
+    /* 電源を入れたときの、横一本の光が広がる演出（表示されるたびに1回） */
+    .screen::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: var(--crt-light);
+      opacity: 0;
+      animation: power-on 520ms ease-out;
+    }
+    @keyframes power-on {
+      0% { opacity: 0.9; transform: scaleY(0.02); }
+      45% { opacity: 0.5; transform: scaleY(1); }
+      100% { opacity: 0; transform: scaleY(1); }
+    }
+    .screen .corner {
+      display: inline-block;
+      margin: 0 0 var(--gap-4);
+      padding-bottom: var(--gap-1);
+      font-family: var(--font-head);
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      color: var(--yamabuki);
+      border-bottom: 4px solid var(--yamabuki);
+    }
+    .screen .host { font-size: 28px; line-height: 1.6; margin: 0 0 var(--gap-5); overflow-wrap: anywhere; }
+    .screen .host .sprite { float: left; margin: 0 var(--gap-4) var(--gap-2) 0; }
+    .screen .host::after { content: ""; display: block; clear: both; }
     .ai-chip {
       display: inline-block;
-      margin-right: 8px;
-      padding: 0 8px;
-      font-size: 18px;
-      font-weight: bold;
-      color: #1b241d;
-      background: #f2c75c;
-      border-radius: 6px;
-      vertical-align: middle;
+      margin-right: var(--gap-2);
+      padding: 0 10px;
+      font-family: var(--font-dot);
+      font-size: 24px;
+      font-weight: 700;
+      line-height: 1.4;
+      color: var(--crt);
+      background: var(--yamabuki);
+      border-radius: 4px;
+      vertical-align: 0.15em;
     }
-    .screen .meet { font-size: 24px; color: #f2c75c; margin: 0 0 12px; }
-    .screen .post { border-top: 2px dashed #f3ecd2; padding-top: 12px; }
-    .screen .post .who { font-size: 20px; color: #9fd8a6; margin: 0; }
-    .screen .post .card { font-size: 30px; font-weight: bold; margin: 0; overflow-wrap: anywhere; }
-    .screen .post .text { font-size: 26px; margin: 4px 0 0; overflow-wrap: anywhere; }
-    .screen .fade { animation: fade-in 350ms ease-out; }
+    .screen .meet { font-size: 28px; font-weight: 700; color: var(--yamabuki); margin: 0 0 var(--gap-4); }
+    .screen .post {
+      position: relative;
+      padding-top: var(--gap-4);
+      /* ドットの点線 */
+      border-top: 4px dotted var(--crt-light);
+    }
+    .screen .post .who { display: flex; align-items: center; gap: var(--gap-3); font-size: 28px; font-weight: 700; color: var(--asagi-text); margin: 0 0 var(--gap-2); }
+    .screen .post .card { font-size: 38px; font-weight: 800; line-height: 1.4; margin: 0; overflow-wrap: anywhere; }
+    .screen .post .text { font-size: 32px; line-height: 1.6; margin: var(--gap-2) 0 0; overflow-wrap: anywhere; }
+    .screen .fade { position: relative; z-index: 1; animation: fade-in 350ms ease-out; }
     @keyframes fade-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
-    @media (prefers-reduced-motion: reduce) { .screen .fade { animation: none; } }
+
+    /* テレビの右側: つまみ2つ、放送中の小さな灯り、スピーカーの格子 */
+    .tv-dials {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--gap-4);
+      width: 88px;
+      padding: var(--gap-4) var(--gap-2);
+      background: var(--shade);
+      border: 4px solid var(--ink);
+      border-radius: 14px;
+    }
+    .dial {
+      position: relative;
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 40% 35%, var(--wall) 0 30%, var(--wood-light) 31% 100%);
+      border: 4px solid var(--ink);
+      box-shadow: 0 4px 0 var(--ink);
+    }
+    /* つまみの目盛り線 */
+    .dial::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 4px;
+      width: 4px;
+      height: 18px;
+      margin-left: -2px;
+      background: var(--ink);
+      transform-origin: 50% 20px;
+    }
+    .dial + .dial::after { transform: rotate(120deg); }
+    .lamp {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: var(--shu);
+      border: 3px solid var(--ink);
+      animation: lamp 2.4s ease-in-out infinite;
+    }
+    @keyframes lamp { 50% { background: var(--yamabuki); } }
+    .speaker {
+      width: 56px;
+      flex: 1;
+      min-height: 60px;
+      background: repeating-linear-gradient(180deg, var(--ink) 0 4px, var(--wood) 4px 8px);
+      border: 3px solid var(--ink);
+      border-radius: 6px;
+    }
+    /* テレビの脚 */
+    .tv-legs {
+      display: flex;
+      justify-content: space-between;
+      padding: 0 14%;
+      height: 44px;
+    }
+    .tv-legs span {
+      width: 30px;
+      background: var(--wood);
+      border: 4px solid var(--ink);
+      border-top: none;
+      border-radius: 0 0 6px 6px;
+    }
+    .tv-legs span:first-child { transform: skewX(12deg); }
+    .tv-legs span:last-child { transform: skewX(-12deg); }
+    /* テレビの下の注記: 畳の上に直接置かず、紙の短冊にのせる */
+    .slip {
+      margin: var(--gap-4) 0 0;
+      padding: var(--gap-2) var(--gap-4);
+      background: var(--paper);
+      border: 3px solid var(--ink);
+      border-radius: 4px;
+      box-shadow: var(--drop);
+    }
+
+    /* ===== 狭い画面（スマホ・小さいタブレット） ===== */
+    @media (max-width: 640px) {
+      header { padding: var(--gap-3) var(--gap-3) var(--gap-4); }
+      h1 { font-size: 32px; }
+      .shoji { min-height: 60px; padding: var(--gap-1) var(--gap-3) 0; }
+      main { padding: var(--gap-5) var(--gap-3) 56px; }
+      .panel { border-width: 8px; padding: var(--gap-4); }
+      .tv { grid-template-columns: 1fr; padding: var(--gap-3); }
+      .tv-dials { width: auto; flex-direction: row; justify-content: center; padding: var(--gap-2); }
+      .speaker { flex: none; width: 80px; min-height: 40px; }
+      .screen { min-height: 300px; padding: var(--gap-5) var(--gap-4); border-radius: 32px / 26px; }
+      .screen .post .card { font-size: 32px; }
+      .screen .post .text { font-size: 28px; }
+      #date-view .rings { gap: 80px; }
+      /* 投稿の短冊: 絵と本文を1行目に、「消す」は次の行の右へ */
+      ul.posts li { flex-wrap: wrap; }
+      ul.posts .body { flex-basis: calc(100% - 72px); }
+      ul.posts li button { margin-left: auto; }
+    }
+
+    /* 動きを減らす設定の人には、動きを止める */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+      .screen::before { display: none; }
+      button:active, button[aria-pressed="true"], #evening:active, button.primary:active { transform: none; }
+    }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -156,6 +628,18 @@
     <button id="sound" type="button" aria-pressed="false">音を消す</button>
     <button id="evening" class="primary">夜7時にする</button>
   </header>
+
+  <!-- 障子の帯。app.js が data-sprite の場所にドット絵を入れる（飾りなので読み上げない） -->
+  <div class="shoji" aria-hidden="true">
+    <div class="shelf">
+      <span data-sprite="柱時計" data-scale="3"></span>
+    </div>
+    <div class="shelf">
+      <span data-sprite="湯呑" data-scale="4"></span>
+      <span data-sprite="みかん" data-scale="4"></span>
+      <span data-sprite="みかん" data-scale="3"></span>
+    </div>
+  </div>
 
   <main>
     <section id="post-view" class="panel" aria-labelledby="post-title">
@@ -192,13 +676,14 @@
         <p class="note">声は保存しません。音声認識はブラウザの機能で、提供元のサーバーに送られる場合があります。整えるために話の文章はClaudeに送ります。</p>
         <p class="note">声は文字になって、入力欄に入ります。まちがいがないか見てから、「おくる」を押してください。</p>
       </div>
-      <div class="row" style="margin-top: 12px">
+      <div class="row" style="margin-top: 24px">
         <button id="send" class="primary">おくる</button>
       </div>
       <p id="msg" class="msg" role="status"></p>
     </section>
 
     <section id="date-view" class="panel" aria-labelledby="date-title">
+      <div class="rings" aria-hidden="true"><span></span><span></span></div>
       <h2 id="date-title">つぎに会う日</h2>
       <p class="note">日にちが決まっていれば、えらんでください（決まっていなくてもよい）。それぞれの「会いたい日」の希望は、上の「つぎに会う日の希望」から送れます。</p>
       <input id="next-date" type="date" aria-labelledby="date-title">
@@ -214,14 +699,22 @@
     </section>
 
     <section id="tv-view" hidden aria-label="夜7時のかぞくニュース">
+      <div class="antenna" aria-hidden="true"><span></span></div>
       <div class="tv">
         <div class="screen" id="screen" tabindex="-1" aria-live="polite"></div>
-        <div class="row" style="margin: 16px 0 0">
+        <div class="tv-dials" aria-hidden="true">
+          <span class="dial"></span>
+          <span class="dial"></span>
+          <span class="lamp"></span>
+          <span class="speaker"></span>
+        </div>
+        <div class="row">
           <button id="next" class="primary">つぎへ</button>
           <button id="back">投稿にもどる</button>
         </div>
       </div>
-      <p class="note">つなぎの言葉は「AI」が付けました。みなさんの言葉は、そのまま出しています。</p>
+      <div class="tv-legs" aria-hidden="true"><span></span><span></span></div>
+      <p class="note slip">つなぎの言葉は「AI」が付けました。みなさんの言葉は、そのまま出しています。</p>
     </section>
   </main>
 

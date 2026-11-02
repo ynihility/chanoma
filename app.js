@@ -6,6 +6,7 @@ import {
 } from './safe.js';
 import { play, setMuted } from './sound.js';
 import { voiceSupported, listen } from './voice.js';
+import { spriteCanvas } from './pixel.js';
 
 // お題ごとの札。「つぎに会う日」の希望も同じ形で持つ
 const CARDS = {
@@ -80,7 +81,7 @@ function save() {
 
 // 選ぶボタンの並びを作る。並びが同じなら、ボタンは作り直さず選択の印だけを更新する。
 // 作り直すとキーボードのフォーカスが消えて、押すたびに先頭から Tab をやり直すことになるため
-function renderChoices(containerId, items, current, onPick, emptyText) {
+function renderChoices(containerId, items, current, onPick, emptyText, withIcon = false) {
   const box = $(containerId);
   const key = items.join('\u0000');
   if (box.dataset.key !== key) {
@@ -91,6 +92,11 @@ function renderChoices(containerId, items, current, onPick, emptyText) {
       box.replaceChildren(...items.map((item) => {
         const b = el('button', item);
         b.type = 'button';
+        // 動物のボタンは、名前の上にドット絵を出す（飾りなので読み上げない）
+        if (withIcon) {
+          b.classList.add('animal');
+          b.prepend(spriteCanvas(item, 3));
+        }
         // もう一度押すと、選びなおせるように印を外す
         b.addEventListener('click', () => {
           play('tap');
@@ -129,7 +135,7 @@ function renderForm() {
   renderChoices('animals', ANIMALS, profile().animal, (v) => {
     profile().animal = v;
     renderForm();
-  });
+  }, undefined, true);
   if ($('nick').value !== profile().nick) $('nick').value = profile().nick;
   // よびかたの入力欄は、人を切り替えたときに合わせる（入力中は触らない）
   if (document.activeElement !== $('rename') && $('rename').value !== role) $('rename').value = role;
@@ -212,6 +218,8 @@ function renderPosts() {
       // 消したボタンは無くなるので、フォーカスを見出しに移す
       $('list-title').focus();
     });
+    // 動物を選んでいれば、左にドット絵を置く（飾りなので読み上げない）
+    if (p.animal) li.append(spriteCanvas(p.animal, 3));
     li.append(body, del);
     list.append(li);
   }
@@ -328,7 +336,8 @@ function buildSteps(news, posts, nextDate) {
 
 function hostLine(text) {
   const p = el('p', undefined, 'host');
-  p.append(el('span', 'AI', 'ai-chip'), document.createTextNode(text));
+  // 司会のテレ吉（飾り）。つなぎの言葉の左に出る
+  p.append(spriteCanvas('テレ吉', 4), el('span', 'AI', 'ai-chip'), document.createTextNode(text));
   return p;
 }
 
@@ -343,7 +352,10 @@ function renderStep() {
     const p = step.post;
     const box = el('div', undefined, 'post');
     const name = p.name ? `${p.who}（${p.name}）` : p.who;
-    box.append(el('p', p.animal ? `【${p.animal}】${name}` : name, 'who'));
+    const who = el('p', p.animal ? `【${p.animal}】${name}` : name, 'who');
+    // 投稿した人の動物を、名前の左に出す（飾り）
+    if (p.animal) who.prepend(spriteCanvas(p.animal, 3));
+    box.append(who);
     // つぎに会う日の希望は「なにしたい　おでかけ」のように、お題と札を並べて出す
     // 「いつ会いたい」は、札のかわりに日付と、あと何日かを出す
     const wish = p.wishDate ? `${monthDay(p.wishDate)}${daysSuffix(p.wishDate)}` : p.card;
@@ -517,6 +529,11 @@ $('voice-box').hidden = !voiceSupported();
   $('wish-date').min = today;
 }
 if (state.nextDate) $('next-date').value = state.nextDate;
+
+// 障子の帯の飾り（柱時計・湯呑・みかん）。飾りなので読み上げない
+for (const slot of document.querySelectorAll('[data-sprite]')) {
+  slot.append(spriteCanvas(slot.dataset.sprite, Number(slot.dataset.scale) || 3));
+}
 
 renderRoles();
 renderForm();
