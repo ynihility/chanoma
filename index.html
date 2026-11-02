@@ -317,6 +317,62 @@
     .note { font-size: 20px; color: var(--shade); margin: var(--gap-2) 0; }
     .msg { min-height: 1.7em; margin: var(--gap-3) 0 0; font-weight: 700; color: var(--shu-text); }
 
+    /* 「おくる」を押したとき、選んだどうぶつが、つぶれて、のびて、はずむ。飾りなので、動きを減らす設定では出さない。
+       上下の動き（translate）と、つぶれたり伸びたりする形（scale）は、別々に動かす。
+       足もとを軸にして、しゃがむ → 飛びだす → てっぺん → 落ちる → 着地でつぶれる → 小さくはずむ → 止まる */
+    .send-row { position: relative; }
+    .hop { position: absolute; left: 200px; bottom: 0; width: 85px; height: 85px; pointer-events: none; z-index: 3; }
+    .hop-body {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      transform-origin: 50% 100%;
+      animation: hop-y 1100ms linear both, hop-squash 1100ms linear both, hop-fade 1100ms linear both;
+    }
+    /* 地面の影。高く上がるほど小さく薄くなる */
+    .hop::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      bottom: -5px;
+      width: 64px;
+      height: 10px;
+      margin-left: -32px;
+      background: var(--ink);
+      border-radius: 50%;
+      animation: hop-shadow 1100ms ease-in-out both;
+    }
+    @keyframes hop-y {
+      0%, 11% { translate: 0 0; animation-timing-function: ease-out; }
+      42% { translate: 0 -88px; animation-timing-function: ease-in; }
+      70% { translate: 0 0; animation-timing-function: ease-out; }
+      80% { translate: 0 -16px; animation-timing-function: ease-in; }
+      88%, 100% { translate: 0 0; }
+    }
+    @keyframes hop-squash {
+      0% { scale: 1 1; animation-timing-function: ease-out; }
+      11% { scale: 1.26 0.64; animation-timing-function: ease-out; }
+      20% { scale: 0.82 1.28; animation-timing-function: ease-in-out; }
+      42% { scale: 0.94 1.08; animation-timing-function: ease-in; }
+      62% { scale: 0.84 1.24; animation-timing-function: ease-in; }
+      70% { scale: 1.32 0.56; animation-timing-function: ease-out; }
+      80% { scale: 0.96 1.06; animation-timing-function: ease-in; }
+      88% { scale: 1.06 0.94; animation-timing-function: ease-out; }
+      100% { scale: 1 1; }
+    }
+    @keyframes hop-fade { 0%, 88% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes hop-shadow {
+      0% { transform: scaleX(1); opacity: 0.35; }
+      11% { transform: scaleX(1.2); opacity: 0.4; }
+      42% { transform: scaleX(0.55); opacity: 0.15; }
+      70% { transform: scaleX(1.25); opacity: 0.45; }
+      80% { transform: scaleX(0.85); opacity: 0.25; }
+      88% { transform: scaleX(1.05); opacity: 0.35; }
+      100% { transform: scaleX(1); opacity: 0; }
+    }
+
     input[type="text"], input[type="date"] {
       width: 100%;
       max-width: 440px;
@@ -694,6 +750,7 @@
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation: none !important; transition: none !important; }
       .screen::before { display: none; }
+      .hop { display: none; }
       button:active, button[aria-pressed="true"], #evening:active, button.primary:active { transform: none; }
     }
     [hidden] { display: none !important; }
@@ -758,7 +815,7 @@
         <p class="note">声は保存しません。音声認識はブラウザの機能で、提供元のサーバーに送られる場合があります。整えるために話の文章はClaudeに送ります。</p>
         <p class="note">声は文字になって、入力欄に入ります。まちがいがないか見てから、「おくる」を押してください。</p>
       </div>
-      <div class="row" style="margin-top: 24px">
+      <div class="row send-row" id="send-row" style="margin-top: 24px">
         <button id="send" class="primary">おくる</button>
       </div>
       <p id="msg" class="msg" role="status"></p>

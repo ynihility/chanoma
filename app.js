@@ -233,6 +233,28 @@ function renderPosts() {
   }
 }
 
+// 動きを減らす設定か（そのときは、飾りの動きを出さない）
+const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// 「おくる」を押したとき、選んだどうぶつが、ボタンの横でつぶれて、のびて、はずむ（飾り。動きは CSS の .hop）
+function hopAnimal(animal) {
+  if (!animal || prefersReducedMotion()) return;
+  const row = $('send-row');
+  // 続けて押されたときは、前のものを片づけてから出す
+  row.querySelector('.hop')?.remove();
+  const hop = el('span', undefined, 'hop');
+  hop.setAttribute('aria-hidden', 'true');
+  const body = el('span', undefined, 'hop-body');
+  body.append(spriteCanvas(animal, 5, undefined, { shadow: true }));
+  hop.append(body);
+  row.append(hop);
+  // 動きが終わったら外す。終わりの合図が来なかったときも、残らないように時間でも外す
+  body.addEventListener('animationend', (e) => {
+    if (e.animationName === 'hop-fade') hop.remove();
+  });
+  setTimeout(() => hop.remove(), 1500);
+}
+
 // 投稿のIDは、safe.js の決まり（英数字と - _ で20文字まで）に合わせる
 const newId = () => `p${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-5)}`;
 
@@ -269,6 +291,7 @@ function submitPost() {
   state = { posts: r.posts, ...keep() };
   const saved = save();
   play('send');
+  hopAnimal(post.animal);
   pick.topic = pick.card = pick.headline = '';
   $('text').value = '';
   $('wish-date').value = '';
