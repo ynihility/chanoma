@@ -207,7 +207,7 @@ function renderPosts() {
   const list = $('posts');
   list.replaceChildren();
   if (state.posts.length === 0) {
-    list.append(el('li', 'まだ投稿はありません。'));
+    list.append(el('li', 'きょうの投稿は、ここにならびます。'));
   }
   for (const p of state.posts) {
     const li = el('li');
@@ -338,7 +338,7 @@ function daysSuffix(dateText) {
 
 // 「つぎに会う日」の1行
 function meetLine(dateText) {
-  if (!dateText) return 'つぎに会う日は、まだ決まっていません。';
+  if (!dateText) return 'つぎに会う日は、決まったらここに出ます。';
   return `つぎに会う日：${monthDay(dateText)}${daysSuffix(dateText)}`;
 }
 
@@ -433,7 +433,7 @@ function showError(message) {
 async function goEvening() {
   cancelVoice();
   if (state.posts.length === 0) {
-    say('まだ投稿がありません。');
+    say('投稿が1件以上あると、番組を作れます。');
     return;
   }
   const button = $('evening');
@@ -448,7 +448,7 @@ async function goEvening() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-      // サーバーは90秒で切るので、画面はそれより少しだけ長く待つ
+      // 画面が番組を待つのは最大100秒。server.mjs の CLIENT_WAIT_MS と同じ長さで、サーバーは作り直しもこの中に収める
       signal: AbortSignal.timeout(100_000),
     });
     const data = await res.json().catch(() => null);
