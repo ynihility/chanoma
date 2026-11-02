@@ -149,6 +149,7 @@ for (const [mode, label, reason] of [
   ['new-word', '投稿にない言葉（ハンバーグ）を足した', 'ハンバーグ'],
   ['health', '健康効果をうたう文', '健康や孤独にふれる言葉'], ['lonely', 'さみしさの解消をうたう文', '健康や孤独にふれる言葉'],
   ['closing-claim', '締めの言葉で孤独の解消をうたう文', 'closing: 健康や孤独にふれる言葉'],
+  ['advice', '助言めいた文（病院へ行ったほうがいい）', '助言や指図'],
 ]) {
   fakeMode = mode;
   const logFrom = appLog.length;
@@ -159,11 +160,6 @@ for (const [mode, label, reason] of [
   if (reason) check(`弾く: ${label} の理由がログに残る（${reason}）`, reasonLog.includes(reason), reasonLog);
 }
 
-// 既知の穴: 助言めいた文は、いまの検査では弾かれない（safe.js に助言の規則がないため）。
-// 失敗として数えず、結果に「未対応」と表示する。規則を足したら、上の一覧に移す
-fakeMode = 'advice';
-r = await call('POST', '/api/news', { posts });
-console.log(`${r.status === 502 ? 'PASS' : '未対応'}  既知の穴: 助言めいた文（「病院へ行ったほうがいい」）は ${r.status === 502 ? '弾かれる' : '弾かれず ' + r.status + ' で通る'}`);
 fakeMode = '429';
 r = await call('POST', '/api/news', { posts });
 check('弾く: API が 429 -> 502 で APIキーを画面に出さない', r.status === 502 && !r.text.includes(FAKE_KEY) && !r.text.includes('secret'), r.text);

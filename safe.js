@@ -251,6 +251,15 @@ const HEALTH_WORDS = foldAll([
   '一人じゃない', '独りじゃない', 'ぼけ',
 ]);
 const HEALTH_BENIGN = foldAll(['効果音', '静寂', 'ぼけっと']);
+// 司会が家族に助言や指図をしてはいけない（医療・生活の助言、「〜したほうがいい」「〜すべき」など）。
+// 「お会いしましょう」「聞いてみましょう」のふつうの呼びかけは通すため、「〜ましょう」は健康に関わる動作だけ当てる
+const ADVICE_WORDS = foldAll([
+  'ほうがいい', 'ほうがよ', '方がいい', '方が良', '方がよ', 'おすすめ', 'お勧め', 'お薦め', 'オススメ',
+  '病院', '医者', '医師', '受診', '診察', 'お大事', 'おだいじ', '無理をしな', '無理しな', 'むりをしな', 'むりしな',
+  '気をつけて', 'きをつけて', '気を付けて', '気をつけま', 'きをつけま',
+]);
+// 「べき」は「バーベキュー」の「べきゅ」に当てない
+const ADVICE_PATTERN = /べき(?!ゅ)|(飲み|のみ|休み|やすみ|寝|眠り|ねむり|歩き|あるき|運動し|早く寝)ましょう|(といい|ばいい|とよい|ばよい)(ですよ|でしょう|と思)/;
 // 「教えてくれました」は、司会が投稿を紹介するときの自然な言い方なので催促とは数えない
 const URGING_BENIGN = foldAll(['教えてくれ', 'おしえてくれ']);
 // 催促や返事を求める言い方。おわりの「お会いしましょう」は含まれないので、あいさつにも当てる
@@ -305,6 +314,7 @@ function wordProblem(s, ctx) {
   if (RANK_WORDS.some((w) => rank.includes(w)) || RANK_PATTERN.test(rank)) return '順位づけや比べる言葉がある';
   const health = removeAll(g, HEALTH_BENIGN);
   if (HEALTH_WORDS.some((w) => health.includes(w))) return '健康や孤独にふれる言葉がある';
+  if (ADVICE_WORDS.some((w) => g.includes(w)) || ADVICE_PATTERN.test(g)) return '助言や指図にあたる言葉がある';
   const urging = removeAll(g, URGING_BENIGN);
   if (URGING_WORDS.some((w) => urging.includes(w)) || URGING_PATTERN.test(f)) return '催促や返事を求める言葉がある';
   if (DAYS_PATTERN.test(g)) return '残り日数を言っている';
