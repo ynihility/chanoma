@@ -79,7 +79,18 @@ const RETRY_HINTS = [
   ['投稿にない英字', '投稿に出てこない言葉を足さないでください。'],
   ['投稿の本文を写している', '投稿の本文を、つなぎの言葉の中でくり返さないでください。'],
 ];
-const retryHint = (reason) => RETRY_HINTS.find(([key]) => reason.includes(key))?.[1] ?? 'ほかの決まりに合うように作り直してください。';
+// 検査の理由の「…」の中には、返事や投稿の断片（家族の名前など）が入りうる。
+// 断片に」が混ざっていても漏れないように、最後の」までまとめて対象にする
+const FRAGMENT = /「.*」/gs;
+// サーバーの記録に断片が残らないよう、「…」の中を伏せる（例: 投稿にない名前らしい言葉「…」がある）
+const maskFragments = (reason) => reason.replace(FRAGMENT, '「…」');
+// 作り直しの頼み方は、断片と、先頭の場所の印（host(p1): など）を取り除いた理由で選ぶ。
+// 断片や投稿のIDに HTML などの言葉が入っていても、別の頼み方に取り違えないようにするため
+const plainReason = (reason) => reason.replace(FRAGMENT, '').replace(/^(?:host\([^)]*\)|opening|closing): /, '');
+const retryHint = (reason) => {
+  const plain = plainReason(reason);
+  return RETRY_HINTS.find(([key]) => plain.includes(key))?.[1] ?? 'ほかの決まりに合うように作り直してください。';
+};
 
 // 上限の中なら今回の分を数えて true、上限を超えるなら数えずに false を返す
 function takeRateSlot(now = Date.now()) {
@@ -175,7 +186,7 @@ async function askClaude(data, signal) {
   const started = Date.now();
   const first = await callClaude(apiKey, data, signal, '', API_TIMEOUT_MS);
   if (first.ok) return first.news;
-  console.error(`[news] 返ってきた番組が決まりに合いませんでした: ${first.reason}`);
+  console.error(`[news] 返ってきた番組が決まりに合いませんでした: ${maskFragments(first.reason)}`);
   const elapsed = Date.now() - started;
   if (elapsed > RETRY_WITHIN_MS) {
     console.error('[news] 時間が足りないため、作り直しは頼みません');
@@ -189,7 +200,7 @@ async function askClaude(data, signal) {
   console.log('[news] 作り直しを1回だけ頼みます');
   const second = await callClaude(apiKey, data, signal, retryHint(first.reason), Math.min(API_TIMEOUT_MS, CLIENT_WAIT_MS - elapsed - 5_000));
   if (second.ok) return second.news;
-  console.error(`[news] 作り直した番組も決まりに合いませんでした: ${second.reason}`);
+  console.error(`[news] 作り直した番組も決まりに合いませんでした: ${maskFragments(second.reason)}`);
   throw new PublicError(502, NOT_BUILT);
 }
 
