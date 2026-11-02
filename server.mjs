@@ -4,6 +4,8 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+// 投稿と番組の検査は、画面でも使う safe.js に一本化している
+import { CORNERS, cleanPosts, checkNews } from './safe.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 // 1台での実演が前提なので、ほかのパソコンからは届かないように 127.0.0.1 だけで待ち受ける
@@ -23,15 +25,13 @@ const STATIC_FILES = {
 };
 
 const MAX_BODY_BYTES = 16 * 1024;
-const MAX_POSTS = 30;
-const TODAY_TOPICS = ['ごはん', 'そら', 'したこと', 'みつけた'];
-const NEXT_TOPICS = ['なにしたい', 'どこ行きたい', 'なに食べたい'];
-const HEADLINES = ['うれしかった', 'おいしかった', 'びっくり', 'なつかしい'];
-const ANIMALS = ['ねこ', 'いぬ', 'うさぎ', 'くま', 'すずめ', 'かめ'];
-// 放送の順番。この並びより前に戻るコーナーがあれば、番組として受け取らない
-const CORNERS = ['ひとこと', 'むかし', 'つぎ'];
-const MAX_HOST_CHARS = 80;
-const MAX_GREETING_CHARS = 100;
+// 同時に Claude を呼べる数。万一ほかから呼ばれ続けても、API の料金が一気に減らないようにする
+const MAX_IN_FLIGHT = 3;
+let inFlight = 0;
+// 自分のアドレスあてのリクエストだけ受ける。外のサイトの名前が一時的に自分のパソコンを指すようにして
+// 呼びつける攻撃（DNS リバインディング）では、Host がそのサイト名になるので弾ける
+const ALLOWED_HOSTS = new Set([`${HOST}:${PORT}`, `localhost:${PORT}`]);
+const ALLOWED_ORIGINS = new Set([`http://${HOST}:${PORT}`, `http://localhost:${PORT}`]);
 
 // Claude に返してもらう番組の形。本文は返させず、from で元の投稿を指してもらう
 const NEWS_SCHEMA = {
@@ -70,129 +70,47 @@ function sendJson(res, status, data) {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
+    // 大きすぎる本文を送られたときは、返事を返したあとで接続を閉じて、残りを読み続けない
+    ...(status === 413 ? { Connection: 'close' } : {}),
   });
   res.end(JSON.stringify(data));
 }
+
+const TOO_LARGE = '投稿の量が多すぎます。ひとことを短くして、もう一度お試しください。';
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
-    let tooLarge = false;
+    let done = false;
     req.on('data', (chunk) => {
       size += chunk.length;
-      // 上限を超えたら中身は捨てて読み終わるのを待つ。途中で切ると返事が届かないため
-      if (size > MAX_BODY_BYTES) tooLarge = true;
-      if (!tooLarge) chunks.push(chunk);
-    });
-    req.on('end', () => {
-      if (tooLarge) {
-        reject(new PublicError(413, '投稿の量が多すぎます。ひとことを短くして、もう一度お試しください。'));
+      if (done) return;
+      // 上限を超えたら、すぐ断る。届いた分は捨てて、これ以上ためない
+      if (size > MAX_BODY_BYTES) {
+        done = true;
+        chunks.length = 0;
+        reject(new PublicError(413, TOO_LARGE));
         return;
       }
-      resolve(Buffer.concat(chunks).toString('utf8'));
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (!done) resolve(Buffer.concat(chunks).toString('utf8'));
     });
     req.on('error', reject);
   });
 }
 
-// 任意の文字列項目。空や未指定なら undefined を返し、長すぎれば弾く
-function optionalText(value, max, label) {
-  if (value === undefined || value === null || value === '') return undefined;
-  if (typeof value !== 'string' || value.length > max) {
-    throw new PublicError(400, `${label}は${max}文字以内の文字で入力してください。`);
-  }
-  return value.trim() || undefined;
-}
-
-function optionalChoice(value, choices, label) {
-  if (value === undefined || value === null || value === '') return undefined;
-  if (!choices.includes(value)) throw new PublicError(400, `${label}の値が正しくありません。`);
-  return value;
-}
-
-// 画面から届いた投稿を検査し、決まった項目だけを持つ新しいオブジェクトに作り直す。
-// 余計な項目を Claude に渡さないため
-function cleanRequest(input) {
-  if (!input || typeof input !== 'object' || !Array.isArray(input.posts)) {
-    throw new PublicError(400, '投稿の形が正しくありません。');
-  }
-  if (input.posts.length === 0 || input.posts.length > MAX_POSTS) {
-    throw new PublicError(400, `投稿は1件以上、${MAX_POSTS}件以内にしてください。`);
-  }
-  const ids = new Set();
-  const posts = input.posts.map((p) => {
-    if (!p || typeof p !== 'object') throw new PublicError(400, '投稿の形が正しくありません。');
-    if (typeof p.id !== 'string' || !/^[A-Za-z0-9_-]{1,20}$/.test(p.id) || ids.has(p.id)) {
-      throw new PublicError(400, '投稿のIDが正しくありません。');
-    }
-    ids.add(p.id);
-    const who = optionalText(p.who, 20, 'よびかた');
-    if (!who) throw new PublicError(400, 'よびかたを入れてください。');
-    const topic = optionalChoice(p.topic, [...TODAY_TOPICS, ...NEXT_TOPICS], 'お題');
-    if (!topic) throw new PublicError(400, 'お題を選んでください。');
-    const post = {
-      id: p.id,
-      who,
-      name: optionalText(p.name, 20, 'ニックネーム'),
-      animal: optionalChoice(p.animal, ANIMALS, 'どうぶつ'),
-      topic,
-      card: optionalText(p.card, 30, '札'),
-      headline: optionalChoice(p.headline, HEADLINES, '見出し'),
-      text: optionalText(p.text, 200, 'ひとこと'),
-    };
-    // 未指定の項目は JSON.stringify で消えるので、Claude には入っている項目だけが届く
-    return post;
-  });
-  let nextDate;
-  if (input.nextDate !== undefined && input.nextDate !== null && input.nextDate !== '') {
-    if (typeof input.nextDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(input.nextDate)) {
-      throw new PublicError(400, 'つぎに会う日の日付が正しくありません。');
-    }
-    nextDate = input.nextDate;
-  }
-  return { posts, nextDate };
-}
-
-// Claude の返事を検査する。投稿にないIDや、使われなかった投稿があれば番組として受け取らない。
-// 投稿にない人物や言葉が host に足されていないかの細かい検査は、画面側の safe.js で行う
-function checkNews(news, posts) {
-  if (!news || typeof news !== 'object' || !Array.isArray(news.segments)) return false;
-  for (const key of ['opening', 'closing']) {
-    const s = news[key];
-    if (typeof s !== 'string' || s.trim() === '' || s.length > MAX_GREETING_CHARS) return false;
-  }
-  const byId = new Map(posts.map((p) => [p.id, p]));
-  const used = new Set();
-  let lastCorner = 0;
-  for (const seg of news.segments) {
-    if (!seg || typeof seg !== 'object') return false;
-    const post = byId.get(seg.from);
-    if (!post || used.has(seg.from)) return false;
-    used.add(seg.from);
-    const cornerIndex = CORNERS.indexOf(seg.corner);
-    if (cornerIndex < lastCorner) return false;
-    lastCorner = cornerIndex;
-    // つぎに会う日の希望は「つぎ」コーナーにだけ、今日の投稿はそれ以外にだけ入る
-    if (NEXT_TOPICS.includes(post.topic) !== (seg.corner === 'つぎ')) return false;
-    if (typeof seg.host !== 'string' || seg.host.trim() === '' || seg.host.length > MAX_HOST_CHARS) return false;
-  }
-  if (used.size !== posts.length) return false;
-  return {
-    opening: news.opening,
-    segments: news.segments.map((s) => ({ corner: s.corner, from: s.from, host: s.host })),
-    closing: news.closing,
-  };
-}
-
-async function askClaude(data) {
+// signal は、画面側が途中でやめたときに Claude への問い合わせも止めるためのもの
+async function askClaude(data, signal) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     console.error('[news] ANTHROPIC_API_KEY が設定されていません');
     throw new PublicError(500, 'サーバーの準備ができていません。管理する人に確認してください。');
   }
   // 投稿の中に </posts> と書かれていても囲みが崩れないように、< を JSON のエスケープに置き換える
-  const postsJson = JSON.stringify(data).replace(/</g, '\\u003c');
+  const postsJson = JSON.stringify({ posts: data.posts, nextDate: data.nextDate }).replace(/</g, '\\u003c');
   const body = {
     model: MODEL,
     max_tokens: 16000,
@@ -223,7 +141,7 @@ async function askClaude(data) {
         'anthropic-beta': 'server-side-fallback-2026-07-01',
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(90_000),
+      signal: AbortSignal.any([AbortSignal.timeout(90_000), signal]),
     });
   } catch (err) {
     console.error('[news] API に接続できませんでした:', err.name);
@@ -243,9 +161,16 @@ async function askClaude(data) {
     throw new PublicError(502, message);
   }
 
-  const result = await apiRes.json();
-  if (result.stop_reason !== 'end_turn') {
-    console.error(`[news] 番組が最後まで作られませんでした: ${result.stop_reason}`);
+  let result;
+  try {
+    // 本文を読む途中で時間切れになったり、JSON ではなかったりしたときも、502 として扱う
+    result = await apiRes.json();
+  } catch (err) {
+    console.error('[news] API の返事を読めませんでした:', err.name);
+    throw new PublicError(502, '番組を作れませんでした。もう一度お試しください。');
+  }
+  if (result?.stop_reason !== 'end_turn') {
+    console.error(`[news] 番組が最後まで作られませんでした: ${result?.stop_reason}`);
     throw new PublicError(502, '番組を作れませんでした。投稿を見直して、もう一度お試しください。');
   }
   const textBlock = Array.isArray(result.content) ? result.content.find((b) => b.type === 'text') : null;
@@ -256,12 +181,13 @@ async function askClaude(data) {
     news = null;
   }
   const checked = checkNews(news, data.posts);
-  if (!checked) {
-    console.error('[news] 返ってきた番組が決まりに合いませんでした');
+  if (!checked.ok) {
+    // 理由は投稿の中身を含まないので、サーバーの記録には残す。画面には出さない
+    console.error(`[news] 返ってきた番組が決まりに合いませんでした: ${checked.reason}`);
     throw new PublicError(502, '番組をうまく組み立てられませんでした。もう一度お試しください。');
   }
-  console.log(`[news] 番組を作りました（${checked.segments.length}件、出力 ${result.usage?.output_tokens ?? '?'} トークン）`);
-  return checked;
+  console.log(`[news] 番組を作りました（${checked.news.segments.length}件、出力 ${result.usage?.output_tokens ?? '?'} トークン）`);
+  return checked.news;
 }
 
 async function handleNews(req, res) {
@@ -270,6 +196,11 @@ async function handleNews(req, res) {
   if (type !== 'application/json') {
     throw new PublicError(415, '送り方が正しくありません。');
   }
+  // ブラウザから送られるときは Origin が付く。自分の画面以外から来たものは断る
+  const origin = req.headers.origin;
+  if (origin !== undefined && !ALLOWED_ORIGINS.has(origin)) throw new PublicError(403, '送り方が正しくありません。');
+  // 本文の大きさを先に申告してくるので、上限を超えるなら読み始める前に断る
+  if (Number(req.headers['content-length']) > MAX_BODY_BYTES) throw new PublicError(413, TOO_LARGE);
   const raw = await readBody(req);
   let input;
   try {
@@ -277,13 +208,24 @@ async function handleNews(req, res) {
   } catch {
     throw new PublicError(400, '投稿の形が正しくありません。');
   }
-  const data = cleanRequest(input);
-  const news = await askClaude(data);
-  sendJson(res, 200, news);
+  const data = cleanPosts(input);
+  if (!data.ok) throw new PublicError(400, data.error);
+  if (inFlight >= MAX_IN_FLIGHT) throw new PublicError(429, '番組の準備が混み合っています。少し待ってから、もう一度お試しください。');
+  // 画面側が途中でやめた（接続が切れた）ら、Claude への問い合わせも止める
+  const abort = new AbortController();
+  res.on('close', () => {
+    if (!res.writableFinished) abort.abort();
+  });
+  inFlight++;
+  try {
+    sendJson(res, 200, await askClaude(data, abort.signal));
+  } finally {
+    inFlight--;
+  }
 }
 
-async function handleStatic(req, res) {
-  const entry = STATIC_FILES[new URL(req.url, 'http://localhost').pathname];
+async function handleStatic(pathname, res) {
+  const entry = STATIC_FILES[pathname];
   if (!entry) throw new PublicError(404, '見つかりません。');
   let file;
   try {
@@ -301,11 +243,18 @@ async function handleStatic(req, res) {
 
 const server = http.createServer(async (req, res) => {
   try {
-    if (req.url === '/api/news') {
+    if (!ALLOWED_HOSTS.has(req.headers.host)) throw new PublicError(403, '送り方が正しくありません。');
+    let pathname;
+    try {
+      pathname = new URL(req.url, 'http://localhost').pathname;
+    } catch {
+      throw new PublicError(404, '見つかりません。');
+    }
+    if (pathname === '/api/news') {
       if (req.method !== 'POST') throw new PublicError(405, '送り方が正しくありません。');
       await handleNews(req, res);
     } else if (req.method === 'GET') {
-      await handleStatic(req, res);
+      await handleStatic(pathname, res);
     } else {
       throw new PublicError(405, '送り方が正しくありません。');
     }
@@ -319,6 +268,10 @@ const server = http.createServer(async (req, res) => {
     if (!res.headersSent) sendJson(res, 500, { error: 'うまく動きませんでした。もう一度お試しください。' });
   }
 });
+
+// ゆっくり送って接続を握り続けるやり方を防ぐため、受け取りの待ち時間を短くする
+server.headersTimeout = 10_000;
+server.requestTimeout = 30_000;
 
 server.listen(PORT, HOST, () => {
   console.log(`ちゃのま: http://${HOST}:${PORT}/ で待ち受けています`);
