@@ -25,6 +25,7 @@
       --asagi: #7FB8A5;      /* 浅葱（家電の差し色） */
       --asagi-text: #96CDB9; /* 浅葱（ブラウン管の上の文字。走査線で暗くなっても 4.5 以上） */
       --yamabuki: #F0B31C;   /* 山吹 */
+      --done: #5F6B36;       /* 手順の「できた」の丸（深い緑）。紙色のチェックとの比は 4.5 以上 */
       --crt-light: #BFE8D0;  /* ブラウン管の光（字幕） */
       --crt: #10211A;        /* ブラウン管の地 */
       --crt-mid: #1A3328;    /* ブラウン管の中央 */
@@ -316,6 +317,65 @@
     }
     .note { font-size: 20px; color: var(--shade); margin: var(--gap-2) 0; }
     .msg { min-height: 1.7em; margin: var(--gap-3) 0 0; font-weight: 700; color: var(--shu-text); }
+
+    /* 画面の読み上げだけに出す文字（見た目には出さない） */
+    .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+    /* 投稿の手順の丸（だれ → お題 → 札 → おくる）。選んだところにチェックが付き、次にやることの丸が目立つ。
+       色だけに頼らない: できた = チェックの形、次 = 二重の輪と下線、まだ = 数字だけ */
+    .steps { display: flex; list-style: none; margin: var(--gap-4) 0 0; padding: 0; }
+    .steps li {
+      position: relative;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--gap-1);
+      font-weight: 700;
+      line-height: 1.3;
+      text-align: center;
+    }
+    /* 丸と丸をつなぐ線。前の丸の真ん中から、この丸の真ん中まで */
+    .steps li + li::before {
+      content: "";
+      position: absolute;
+      top: 22px;
+      right: 50%;
+      width: 100%;
+      height: 5px;
+      background: var(--wood-light);
+    }
+    .steps li.done + li::before { background: var(--done); }
+    .steps .mark {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      place-items: center;
+      width: 48px;
+      height: 48px;
+      font-family: var(--font-dot);
+      font-size: 26px;
+      line-height: 1;
+      color: var(--ink);
+      background: var(--paper);
+      border: 4px solid var(--ink);
+      border-radius: 50%;
+    }
+    .steps .mark::before { content: attr(data-n); }
+    /* できた: 深い緑の丸に、紙色のチェック */
+    .steps .done .mark { background: var(--done); }
+    .steps .done .mark::before {
+      content: "";
+      width: 12px;
+      height: 22px;
+      margin-top: -5px;
+      border: solid var(--paper);
+      border-width: 0 5px 5px 0;
+      transform: rotate(45deg);
+    }
+    /* 次にやること: 山吹の丸を、紙と濃茶の二重の輪で囲む。名前には下線 */
+    .steps .now .mark { background: var(--yamabuki); box-shadow: 0 0 0 3px var(--paper), 0 0 0 6px var(--ink); }
+    .steps .now .name { text-decoration: underline; text-decoration-thickness: 3px; text-underline-offset: 4px; }
 
     /* 「おくる」を押したとき、選んだどうぶつが、つぶれて、のびて、はずむ。飾りなので、動きを減らす設定では出さない。
        上下の動き（translate）と、つぶれたり伸びたりする形（scale）は、別々に動かす。
@@ -708,6 +768,8 @@
       .screen .post .card { font-size: 32px; }
       .screen .post .text { font-size: 28px; }
       #date-view .rings { gap: 80px; }
+      .steps .mark { width: 44px; height: 44px; font-size: 24px; }
+      .steps li + li::before { top: 20px; }
       /* 司会の文章を細い列にしないよう、テレ吉は吹き出しの上に置く。しっぽも上向きにする */
       .screen .host-row { flex-direction: column; align-items: stretch; gap: var(--gap-4); }
       .screen .host-row .sprite { align-self: flex-start; }
@@ -780,6 +842,12 @@
   <main>
     <section id="post-view" class="panel" aria-labelledby="post-title">
       <h2 id="post-title" tabindex="-1"></h2>
+      <ol class="steps" id="steps" role="list" aria-label="投稿の手順">
+        <li><span class="mark" data-n="1" aria-hidden="true"></span><span class="name">だれ</span><span class="sr"></span></li>
+        <li><span class="mark" data-n="2" aria-hidden="true"></span><span class="name">お題</span><span class="sr"></span></li>
+        <li><span class="mark" data-n="3" aria-hidden="true"></span><span class="name">札</span><span class="sr"></span></li>
+        <li><span class="mark" data-n="4" aria-hidden="true"></span><span class="name">おくる</span><span class="sr"></span></li>
+      </ol>
       <details class="fold" id="rename-box">
         <summary>この人のよびかたを、好きな名前にかえる</summary>
         <p class="label"><label for="rename">新しいよびかた</label></p>

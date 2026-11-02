@@ -147,6 +147,32 @@ function renderForm() {
   if ($('nick').value !== profile().nick) $('nick').value = profile().nick;
   // よびかたの入力欄は、人を切り替えたときに合わせる（入力中は触らない）
   if (document.activeElement !== $('rename') && $('rename').value !== role) $('rename').value = role;
+  renderSteps();
+}
+
+// 投稿の手順の丸（だれ → お題 → 札 → おくる）。選んだところにチェックが付き、次にやることの丸が目立つ
+// 送った直後だけ、その人の4つを全部「できた」にして見せる（次の選択を始めるか、少し経つと戻る）
+let sentBy = '';
+let sentTimer = 0;
+function renderSteps() {
+  const askDate = pick.topic === WISH_DATE_TOPIC;
+  if (sentBy && (sentBy !== role || pick.topic || pick.card)) sentBy = '';
+  const all = sentBy === role;
+  // だれ: 上のボタンでいつも誰かが選ばれている。おくる: 送った直後だけ「できた」
+  const flags = [true, Boolean(pick.topic), askDate ? Boolean($('wish-date').value) : Boolean(pick.card), false].map((v) => v || all);
+  const nowIndex = flags.indexOf(false);
+  const items = [...$('steps').children];
+  items.forEach((li, i) => {
+    li.classList.toggle('done', flags[i]);
+    li.classList.toggle('now', i === nowIndex);
+    if (i === nowIndex) li.setAttribute('aria-current', 'step');
+    else li.removeAttribute('aria-current');
+    li.querySelector('.sr').textContent = flags[i] ? '（できた）' : i === nowIndex ? '（いま）' : '';
+  });
+  // 3つめは、「いつ会いたい」のときだけ、札のかわりに日にちをえらぶ
+  const name = items[2].querySelector('.name');
+  const label = askDate ? '日にち' : '札';
+  if (name.textContent !== label) name.textContent = label;
 }
 
 function renderRoles() {
@@ -292,6 +318,13 @@ function submitPost() {
   const saved = save();
   play('send');
   hopAnimal(post.animal);
+  // 手順の丸を、少しのあいだ全部「できた」にする
+  sentBy = role;
+  clearTimeout(sentTimer);
+  sentTimer = setTimeout(() => {
+    sentBy = '';
+    renderSteps();
+  }, 1800);
   pick.topic = pick.card = pick.headline = '';
   $('text').value = '';
   $('wish-date').value = '';
@@ -509,6 +542,9 @@ $('nick').addEventListener('input', () => {
   profile().nick = $('nick').value;
 });
 $('next-date').addEventListener('change', changeDate);
+// 会いたい日をえらんだら、手順の3つめにチェックを付ける
+$('wish-date').addEventListener('input', renderSteps);
+$('wish-date').addEventListener('change', renderSteps);
 $('rename-go').addEventListener('click', renameRole);
 $('rename').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) renameRole();
