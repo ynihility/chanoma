@@ -8,6 +8,10 @@ import { play, setMuted } from './sound.js';
 import { voiceSupported, listen } from './voice.js';
 import { spriteCanvas } from './pixel.js';
 
+// 演出（canvas）は飾り。読み込めなかったときも、投稿と放送は動かす
+let fx = null;
+import('./effects.js').then((m) => { fx = m; }).catch((e) => console.warn('effects.js を読み込めませんでした', e));
+
 // お題ごとの札。「つぎに会う日」の希望も同じ形で持つ
 const CARDS = {
   'ごはん': ['ごはん', 'パン', 'めん', 'おかず', 'おやつ', 'のみもの'],
@@ -62,6 +66,8 @@ for (const p of state.posts) profiles[p.who] = { animal: p.animal ?? '', nick: p
 const profile = () => (profiles[role] ??= { animal: '', nick: '' });
 // 放送中の状態。steps は順に映す内容、index は今の位置
 let show = { steps: [], index: 0 };
+// いま動いている画面の演出（なければ null）
+let run = null;
 
 function say(message) {
   $('msg').textContent = message;
@@ -289,7 +295,15 @@ function changeDate() {
 
 // ---- 放送画面 ----
 
+// 動いている演出があれば、今すぐ終わらせる（中身の入れ替えまで済ませる）
+function cancelFx() {
+  const r = run;
+  run = null;
+  r?.skip();
+}
+
 function setView(onAir) {
+  cancelFx();
   $('post-view').hidden = onAir;
   $('list-view').hidden = onAir;
   $('date-view').hidden = onAir;
@@ -347,10 +361,18 @@ function hostLine(text) {
   return row;
 }
 
-function renderStep() {
+// 画面の中身を入れ替える。演出の canvas（class が fx）は、動いている最中でも残す
+function setScreen(...nodes) {
   const screen = $('screen');
+  for (const child of [...screen.children]) {
+    if (!child.classList.contains('fx')) child.remove();
+  }
+  screen.append(...nodes);
+}
+
+// いまの場面を、画面にすぐ描く
+function renderStep() {
   const step = show.steps[show.index];
-  screen.replaceChildren();
   const wrap = el('div', undefined, 'fade');
   if (step.kind === 'segment') {
     wrap.append(el('p', CORNER_TITLES[step.corner] ?? '', 'corner'), hostLine(step.host));
@@ -372,18 +394,39 @@ function renderStep() {
   } else {
     wrap.append(el('p', step.kind === 'opening' ? '夜7時のかぞくニュース' : 'おしまい', 'corner'), hostLine(step.host));
   }
-  screen.append(wrap);
-  const last = show.index === show.steps.length - 1;
-  $('next').textContent = last ? 'もう一度みる' : 'つぎへ';
+  setScreen(wrap);
+  updateNext();
+}
+
+// 「つぎへ」のボタンの文字。最後の場面では「もう一度みる」
+function updateNext() {
+  $('next').textContent = show.index === show.steps.length - 1 ? 'もう一度みる' : 'つぎへ';
+}
+
+// コーナーの区別。はじめ・おわりも、ひとつのまとまりとして数える
+const cornerKey = (step) => (step.kind === 'segment' ? step.corner : step.kind);
+
+// 場面を切り替える。コーナーが変わるときは、画面にモザイクの演出をはさむ。
+// 演出が使えない（読み込めない・動きを減らす設定）ときは、すぐ入れ替える
+function goStep(from) {
+  updateNext();
+  if (!fx || cornerKey(from) === cornerKey(show.steps[show.index])) {
+    renderStep();
+    return;
+  }
+  const mine = fx.playWipe($('screen'), 'mosaic', renderStep);
+  run = mine;
+  mine.done.then(() => {
+    if (run === mine) run = null;
+  });
 }
 
 function showError(message) {
   play('error');
   setView(true);
   show = { steps: [{ kind: 'closing', host: message }], index: 0 };
-  const screen = $('screen');
   // アプリ自身のお知らせなので、AI の吹き出し（host）にはしない
-  screen.replaceChildren(el('p', '番組を作れませんでした', 'corner'), el('p', message, 'notice'));
+  setScreen(el('p', '番組を作れませんでした', 'corner'), el('p', message, 'notice'));
   $('next').hidden = true;
 }
 
@@ -456,8 +499,14 @@ $('clear').addEventListener('click', () => {
 });
 $('evening').addEventListener('click', goEvening);
 $('next').addEventListener('click', () => {
+  // 演出の途中で押されたら、演出だけを終わらせて、いまの場面をすぐ見せる（場面は飛ばさない）
+  if (run) {
+    cancelFx();
+    return;
+  }
+  const from = show.steps[show.index];
   show.index = show.index === show.steps.length - 1 ? 0 : show.index + 1;
-  renderStep();
+  goStep(from);
   // 最後の場面では終わりの音、それ以外は鐘の音（はじめに戻るときはテレビの音）
   play(show.index === 0 ? 'tvon' : show.index === show.steps.length - 1 ? 'end' : 'next');
 });
