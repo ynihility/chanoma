@@ -409,3 +409,9 @@ test('checkNews: 好きな名前（ママ）の人を、投稿にないよびか
   assert.equal(checkNews(n('ママのお話です。'), ps).ok, true);
   for (const h of ['ぱぱのお話です。', 'おばちゃんのお話です。', 'おじちゃんのお話です。']) assert.equal(checkNews(n(h), ps).ok, false, h);
 });
+
+test('cleanRoles: 全く同じ名前が重なったときは、同じ言葉を並べない文にする', () => {
+  const r = cleanRoles(['おばあちゃん', 'おばあちゃん', 'c', 'd', 'e']);
+  assert.equal(r.ok, false);
+  assert.match(r.error, /ほかの人がもう使っています/);
+});

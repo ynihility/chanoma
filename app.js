@@ -65,6 +65,8 @@ let show = { steps: [], index: 0 };
 
 function say(message) {
   $('msg').textContent = message;
+  // 操作した場所から離れた所にメッセージが出るので、見える位置まで画面を動かす
+  if (message) $('msg').scrollIntoView({ block: 'nearest' });
 }
 
 // 保存できたら true。使えない環境や容量いっぱいのときは false
@@ -95,7 +97,7 @@ function renderChoices(containerId, items, current, onPick, emptyText, withIcon 
         // 動物のボタンは、名前の上にドット絵を出す（飾りなので読み上げない）
         if (withIcon) {
           b.classList.add('animal');
-          b.prepend(spriteCanvas(item, 3));
+          b.prepend(spriteCanvas(item, 3, undefined, { shadow: true }));
         }
         // もう一度押すと、選びなおせるように印を外す
         b.addEventListener('click', () => {
@@ -219,7 +221,7 @@ function renderPosts() {
       $('list-title').focus();
     });
     // 動物を選んでいれば、左にドット絵を置く（飾りなので読み上げない）
-    if (p.animal) li.append(spriteCanvas(p.animal, 3));
+    if (p.animal) li.append(spriteCanvas(p.animal, 3, undefined, { shadow: true }));
     li.append(body, del);
     list.append(li);
   }
@@ -293,6 +295,8 @@ function setView(onAir) {
   $('date-view').hidden = onAir;
   $('tv-view').hidden = !onAir;
   $('evening').hidden = onAir;
+  // 夜7時: 部屋を暗くして、テレビだけを光らせる
+  document.body.classList.toggle('night', onAir);
   // 押したボタンは隠れるので、フォーカスを新しい画面に移す（キーボードや読み上げの人が迷子にならないように）
   (onAir ? $('screen') : $('post-title')).focus();
 }
@@ -337,7 +341,7 @@ function buildSteps(news, posts, nextDate) {
 function hostLine(text) {
   const p = el('p', undefined, 'host');
   // 司会のテレ吉（飾り）。つなぎの言葉の左に出る
-  p.append(spriteCanvas('テレ吉', 4), el('span', 'AI', 'ai-chip'), document.createTextNode(text));
+  p.append(spriteCanvas('テレ吉', 4, undefined, { shadow: true }), el('span', 'AI', 'ai-chip'), document.createTextNode(text));
   return p;
 }
 
@@ -354,7 +358,7 @@ function renderStep() {
     const name = p.name ? `${p.who}（${p.name}）` : p.who;
     const who = el('p', p.animal ? `【${p.animal}】${name}` : name, 'who');
     // 投稿した人の動物を、名前の左に出す（飾り）
-    if (p.animal) who.prepend(spriteCanvas(p.animal, 3));
+    if (p.animal) who.prepend(spriteCanvas(p.animal, 3, undefined, { shadow: true }));
     box.append(who);
     // つぎに会う日の希望は「なにしたい　おでかけ」のように、お題と札を並べて出す
     // 「いつ会いたい」は、札のかわりに日付と、あと何日かを出す
@@ -455,9 +459,8 @@ $('next').addEventListener('click', () => {
   play(show.index === 0 ? 'tvon' : show.index === show.steps.length - 1 ? 'end' : 'next');
 });
 $('sound').addEventListener('click', () => {
-  const off = $('sound').getAttribute('aria-pressed') !== 'true';
-  $('sound').setAttribute('aria-pressed', String(off));
-  // 色だけで状態を伝えないように、文字も変える
+  // 状態は、ボタンの文字だけで伝える（aria-pressed を付けると「音を出す、押されている」と逆に読まれるため）
+  const off = $('sound').textContent === '音を消す';
   $('sound').textContent = off ? '音を出す' : '音を消す';
   setMuted(off);
   if (!off) play('tap');
@@ -532,7 +535,7 @@ if (state.nextDate) $('next-date').value = state.nextDate;
 
 // 障子の帯の飾り（柱時計・湯呑・みかん）。飾りなので読み上げない
 for (const slot of document.querySelectorAll('[data-sprite]')) {
-  slot.append(spriteCanvas(slot.dataset.sprite, Number(slot.dataset.scale) || 3));
+  slot.append(spriteCanvas(slot.dataset.sprite, Number(slot.dataset.scale) || 3, undefined, { shadow: true }));
 }
 
 renderRoles();

@@ -149,7 +149,12 @@ export function cleanRoles(input) {
     const seen = new Map();
     for (const r of roles) {
       const key = fold(r);
-      if (seen.has(key)) fail(`「${seen.get(key)}」と「${r}」は、同じ名前に見えます。ちがう名前にしてください。`);
+      if (seen.has(key)) {
+        const other = seen.get(key);
+        fail(other === r
+          ? `「${r}」は、ほかの人がもう使っています。ちがう名前にしてください。`
+          : `「${other}」と「${r}」は、同じ名前に見えます。ちがう名前にしてください。`);
+      }
       seen.set(key, r);
     }
     return { ok: true, roles };

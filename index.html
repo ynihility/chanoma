@@ -7,7 +7,7 @@
   <!-- 自分のサーバーのスクリプトだけを動かす。万一 HTML が紛れ込んでも、外へ送ったり別のスクリプトを動かしたりできない -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'">
   <style>
-    /* ===== 色・文字・寸法の決まり（spec.md と同じ値） ===== */
+    /* ===== 色・文字・寸法の決まり ===== */
     :root {
       /* 色。輪郭と文字は黒ではなく濃い茶で統一する */
       --ink: #2A1810;        /* 輪郭・文字 */
@@ -470,7 +470,7 @@
       animation: power-on 520ms ease-out;
     }
     @keyframes power-on {
-      0% { opacity: 0.9; transform: scaleY(0.02); }
+      0% { opacity: 0.6; transform: scaleY(0.02); }
       45% { opacity: 0.5; transform: scaleY(1); }
       100% { opacity: 0; transform: scaleY(1); }
     }
@@ -487,13 +487,18 @@
     }
     .screen .host { font-size: 28px; line-height: 1.6; margin: 0 0 var(--gap-5); overflow-wrap: anywhere; }
     .screen .host .sprite { float: left; margin: 0 var(--gap-4) var(--gap-2) 0; }
+    /* 暗い画面では濃茶の輪郭が沈むので、絵のまわりに淡い縁取りを付ける */
+    .screen .sprite {
+      filter: drop-shadow(1px 0 0 var(--crt-light)) drop-shadow(-1px 0 0 var(--crt-light))
+              drop-shadow(0 1px 0 var(--crt-light)) drop-shadow(0 -1px 0 var(--crt-light));
+    }
     .screen .host::after { content: ""; display: block; clear: both; }
     .ai-chip {
       display: inline-block;
       margin-right: var(--gap-2);
       padding: 0 10px;
       font-family: var(--font-dot);
-      font-size: 24px;
+      font-size: 28px;
       font-weight: 700;
       line-height: 1.4;
       color: var(--crt);
@@ -605,10 +610,39 @@
       .screen .post .card { font-size: 32px; }
       .screen .post .text { font-size: 28px; }
       #date-view .rings { gap: 80px; }
+      /* 司会の文章を細い列にしないよう、テレ吉は文章の上に置く */
+      .screen .host .sprite { float: none; display: block; margin: 0 0 var(--gap-2); }
+      /* 「つぎへ」が画面の外に出ないよう、下に固定する */
+      .tv > .row { position: sticky; bottom: var(--gap-3); z-index: 5; }
       /* 投稿の短冊: 絵と本文を1行目に、「消す」は次の行の右へ */
       ul.posts li { flex-wrap: wrap; }
       ul.posts .body { flex-basis: calc(100% - 72px); }
       ul.posts li button { margin-left: auto; }
+    }
+
+    /* ===== 夜7時: 部屋を暗くして、テレビだけが光る ===== */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+      background: rgba(10, 6, 4, 0.78);
+      opacity: 0;
+      transition: opacity 600ms ease;
+    }
+    body.night::before { opacity: 1; }
+    body.night #tv-view { position: relative; z-index: 3; }
+    body.night .tv { filter: drop-shadow(0 0 36px rgba(191, 232, 208, 0.45)); }
+
+    /* よびかたの変更は、ふだんは畳んでおく（投稿欄を上に近づけるため） */
+    details.fold { margin: var(--gap-3) 0 0; }
+    details.fold > summary {
+      display: flex;
+      align-items: center;
+      min-height: 56px;
+      font-weight: 700;
+      cursor: pointer;
     }
 
     /* 動きを減らす設定の人には、動きを止める */
@@ -625,7 +659,7 @@
     <h1>ちゃのま</h1>
     <div class="row" id="roles" role="group" aria-label="だれが使いますか"></div>
     <span class="spacer"></span>
-    <button id="sound" type="button" aria-pressed="false">音を消す</button>
+    <button id="sound" type="button">音を消す</button>
     <button id="evening" class="primary">夜7時にする</button>
   </header>
 
@@ -644,11 +678,14 @@
   <main>
     <section id="post-view" class="panel" aria-labelledby="post-title">
       <h2 id="post-title" tabindex="-1"></h2>
-      <p class="label"><label for="rename">この人のよびかた（好きな名前に、かえられます）</label></p>
-      <div class="row">
-        <input id="rename" type="text" maxlength="20" autocomplete="off">
-        <button id="rename-go" type="button">なまえをかえる</button>
-      </div>
+      <details class="fold" id="rename-box">
+        <summary>この人のよびかたを、好きな名前にかえる</summary>
+        <p class="label"><label for="rename">新しいよびかた</label></p>
+        <div class="row">
+          <input id="rename" type="text" maxlength="20" autocomplete="off">
+          <button id="rename-go" type="button">なまえをかえる</button>
+        </div>
+      </details>
       <p class="label" id="animals-label">キャラ（どうぶつ）をえらぶ</p>
       <div class="row" id="animals" role="group" aria-labelledby="animals-label"></div>
       <p class="label"><label for="nick">ニックネーム（なくてもよい）</label></p>
