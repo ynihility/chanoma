@@ -48,6 +48,39 @@ const RATE_LIMITED = '番組を作る回数が上限に達しました。しば�
 // Claude を呼んだ時刻（ミリ秒）を古い順に持つ。24時間より前のものは捨てる
 const callTimes = [];
 
+// Claude への1回の問い合わせを待つ長さ
+const API_TIMEOUT_MS = 90_000;
+// 画面（app.js）が番組を待つ長さ。作り直しはこの中に収める
+const CLIENT_WAIT_MS = 100_000;
+// 1回目にこれより長くかかったら、作り直しは間に合わないので頼まない
+const RETRY_WITHIN_MS = 45_000;
+const NOT_BUILT = '番組をうまく組み立てられませんでした。もう一度お試しください。';
+// 作り直しを頼むときの言い方。検査の理由には、返事の断片（投稿の文が写っていることもある）が入りうる。
+// それを投稿の囲みの外に置くと、投稿に仕込まれた指示が格上げされるので、理由の文字列は渡さず、この一覧の決まった言い方だけを選ぶ
+const RETRY_HINTS = [
+  ['番組の形が違う', '返事は、決められた番組の JSON の形だけにしてください。'],
+  ['segments の', 'すべての投稿を、1回ずつ、投稿にある id で使ってください。'],
+  ['使われていない投稿', 'すべての投稿を、1回ずつ、投稿にある id で使ってください。'],
+  ['投稿にないIDか', 'すべての投稿を、1回ずつ、投稿にある id で使ってください。'],
+  ['コーナーの順番', 'コーナーは、ひとこと、むかし、つぎ の順に並べてください。'],
+  ['投稿とコーナーが合わない', 'つぎに会う日の希望は「つぎ」に、今日の投稿はそれ以外のコーナーに入れてください。'],
+  ['の長さや型が違う', 'つなぎの言葉とあいさつは、決められた長さの中で書いてください。'],
+  ['見えない文字', '見えない文字や改行を入れないでください。'],
+  ['HTML', '記号、URL、絵文字を入れないでください。'],
+  ['順位づけ', '順位をつけたり、比べたりする言葉を使わないでください。'],
+  ['健康や孤独', '健康や孤独にふれる言葉を使わないでください。'],
+  ['助言や指図', '助言や指図にあたる言葉を使わないでください。'],
+  ['催促や返事', '催促や返事を求める言葉を使わないでください。'],
+  ['残り日数', '残り日数を言わないでください。'],
+  ['日付や曜日', '日付や曜日を言わないでください。'],
+  ['投稿にない家族のよびかた', '投稿にない人の呼び方や名前を足さないでください。'],
+  ['投稿にない名前らしい言葉', '投稿にない人の呼び方や名前を足さないでください。'],
+  ['投稿にないカタカナ語', '投稿に出てこない言葉を足さないでください。'],
+  ['投稿にない英字', '投稿に出てこない言葉を足さないでください。'],
+  ['投稿の本文を写している', '投稿の本文を、つなぎの言葉の中でくり返さないでください。'],
+];
+const retryHint = (reason) => RETRY_HINTS.find(([key]) => reason.includes(key))?.[1] ?? 'ほかの決まりに合うように作り直してください。';
+
 // 上限の中なら今回の分を数えて true、上限を超えるなら数えずに false を返す
 function takeRateSlot(now = Date.now()) {
   while (callTimes.length > 0 && callTimes[0] <= now - 86_400_000) callTimes.shift();
@@ -130,6 +163,8 @@ function readBody(req) {
   });
 }
 
+// 番組を作る。検査で弾いた番組は、決まった言い方の理由を添えて1回だけ作り直させる。
+// API のエラーや、Claude が断った・途中で終わったときは作り直さない（費用と時間を増やさないため）
 // signal は、画面側が途中でやめたときに Claude への問い合わせも止めるためのもの
 async function askClaude(data, signal) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -137,6 +172,30 @@ async function askClaude(data, signal) {
     console.error('[news] ANTHROPIC_API_KEY が設定されていません');
     throw new PublicError(500, 'サーバーの準備ができていません。管理する人に確認してください。');
   }
+  const started = Date.now();
+  const first = await callClaude(apiKey, data, signal, '', API_TIMEOUT_MS);
+  if (first.ok) return first.news;
+  console.error(`[news] 返ってきた番組が決まりに合いませんでした: ${first.reason}`);
+  const elapsed = Date.now() - started;
+  if (elapsed > RETRY_WITHIN_MS) {
+    console.error('[news] 時間が足りないため、作り直しは頼みません');
+    throw new PublicError(502, NOT_BUILT);
+  }
+  // 作り直しも1回の呼び出しとして数える。上限に届いていたら頼まない
+  if (!takeRateSlot()) {
+    console.error('[news] 回数の上限に届いたため、作り直しは頼みません');
+    throw new PublicError(502, NOT_BUILT);
+  }
+  console.log('[news] 作り直しを1回だけ頼みます');
+  const second = await callClaude(apiKey, data, signal, retryHint(first.reason), Math.min(API_TIMEOUT_MS, CLIENT_WAIT_MS - elapsed - 5_000));
+  if (second.ok) return second.news;
+  console.error(`[news] 作り直した番組も決まりに合いませんでした: ${second.reason}`);
+  throw new PublicError(502, NOT_BUILT);
+}
+
+// Claude に1回だけ問い合わせ、検査に通れば {ok:true, news}、通らなければ {ok:false, reason} を返す。
+// hint は作り直しのときだけ渡す、RETRY_HINTS の決まった言い方
+async function callClaude(apiKey, data, signal, hint, timeoutMs) {
   // 投稿の中に </posts> と書かれていても囲みが崩れないように、< を JSON のエスケープに置き換える
   const postsJson = JSON.stringify({ posts: data.posts, nextDate: data.nextDate }).replace(/</g, '\\u003c');
   const body = {
@@ -153,7 +212,8 @@ async function askClaude(data, signal) {
     messages: [
       {
         role: 'user',
-        content: `今夜の番組の材料です。\n<posts>\n${postsJson}\n</posts>`,
+        content: `今夜の番組の材料です。\n<posts>\n${postsJson}\n</posts>`
+          + (hint ? `\n\n前に作った番組は、決まりに合わなかったため使えませんでした。${hint}ほかの決まりも、これまでどおり守ってください。` : ''),
       },
     ],
   };
@@ -169,7 +229,7 @@ async function askClaude(data, signal) {
         'anthropic-beta': 'server-side-fallback-2026-07-01',
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.any([AbortSignal.timeout(90_000), signal]),
+      signal: AbortSignal.any([AbortSignal.timeout(timeoutMs), signal]),
     });
   } catch (err) {
     console.error('[news] API に接続できませんでした:', err.name);
@@ -209,13 +269,10 @@ async function askClaude(data, signal) {
     news = null;
   }
   const checked = checkNews(news, data.posts);
-  if (!checked.ok) {
-    // 理由は投稿の中身を含まないので、サーバーの記録には残す。画面には出さない
-    console.error(`[news] 返ってきた番組が決まりに合いませんでした: ${checked.reason}`);
-    throw new PublicError(502, '番組をうまく組み立てられませんでした。もう一度お試しください。');
-  }
-  console.log(`[news] 番組を作りました（${checked.news.segments.length}件、出力 ${result.usage?.output_tokens ?? '?'} トークン）`);
-  return checked.news;
+  // 理由はサーバーの記録にだけ残す（画面には出さない）。作り直すかどうかは呼ぶ側が決める
+  if (!checked.ok) return { ok: false, reason: checked.reason };
+  console.log(`[news] 番組を作りました（${checked.news.segments.length}件、出力 ${result.usage?.output_tokens ?? '?'} トークン${hint ? '、作り直し' : ''}）`);
+  return { ok: true, news: checked.news };
 }
 
 async function handleNews(req, res) {
