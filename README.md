@@ -17,6 +17,7 @@ You need Node.js (tested with v24) and an Anthropic API key. There are no npm de
    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b); Remove-Variable s, b
    node server.mjs
    ```
+   When you are done, close this window. Do not start other tools from the window that holds the key.
 2. Open <http://127.0.0.1:8787/> in a browser.
 3. Switch between the family members at the top, pick a topic and a card, and press **おくる (send)**. Add posts for two or three people. You can also choose an animal character, a nickname, a date you want to meet, and rename each person.
 4. Press **夜7時にする (make it 7 p.m.)**. The room gets dark and the TV plays the program. Press **つぎへ (next)** to move on.
@@ -66,6 +67,7 @@ Node.js（v24 で確認）と、Anthropic の API キーが必要です。npm �
    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b); Remove-Variable s, b
    node server.mjs
    ```
+   終わったら、このウィンドウを閉じてください。キーを設定したウィンドウでは、ほかの道具を起動しないでください。
 2. ブラウザで <http://127.0.0.1:8787/> を開きます。
 3. 上のボタンで家族の人を切り替え、お題と札を選んで「おくる」を押します。2〜3人分の投稿を入れてください。動物のキャラ、ニックネーム、会いたい日、よびかたの変更もできます。
 4. 「夜7時にする」を押すと、部屋が暗くなり、テレビで番組が始まります。「つぎへ」で進みます。
