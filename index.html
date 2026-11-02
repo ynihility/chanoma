@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ちゃのま</title>
+  <style>
+    body { font-family: sans-serif; padding: 24px; }
+    .cards { display: flex; gap: 16px; }
+    /* 現れる前は見えない状態にして、読み込み直後のちらつきを防ぐ */
+    .card { font-size: 24px; padding: 24px; opacity: 0; }
+  </style>
+</head>
+<body>
+  <div class="cards">
+    <button class="card">場面1</button>
+    <button class="card">場面2</button>
+    <button class="card">場面3</button>
+  </div>
+  <!-- animejs の配布ファイル(ビルド不要版)。グローバル変数 anime が使えるようになる -->
+  <script src="node_modules/animejs/dist/bundles/anime.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
