@@ -27,9 +27,8 @@ const fail = (message) => {
 
 function optionalText(value, max, label) {
   if (value === undefined || value === null || value === '') return undefined;
-  if (typeof value !== 'string' || value.length > max || CONTROL_CHARS.test(value)) {
-    fail(`${label}は${max}文字以内の文字で入力してください。`);
-  }
+  if (typeof value !== 'string' || value.length > max) fail(`${label}は${max}文字以内の文字で入力してください。`);
+  if (CONTROL_CHARS.test(value)) fail(`${label}に、改行や見えない文字は使えません。`);
   return value.trim() || undefined;
 }
 

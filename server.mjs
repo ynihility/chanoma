@@ -24,7 +24,8 @@ const STATIC_FILES = {
   '/safe.js': ['safe.js', 'text/javascript; charset=utf-8'],
 };
 
-const MAX_BODY_BYTES = 16 * 1024;
+// 30件 × 200文字のひとことが、日本語（1文字3バイト）で約22KBになる。それより余裕をもたせた上限
+const MAX_BODY_BYTES = 32 * 1024;
 // 同時に Claude を呼べる数。万一ほかから呼ばれ続けても、API の料金が一気に減らないようにする
 const MAX_IN_FLIGHT = 3;
 let inFlight = 0;
