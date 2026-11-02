@@ -22,6 +22,8 @@ const STATIC_FILES = {
   '/index.html': ['index.html', 'text/html; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
   '/safe.js': ['safe.js', 'text/javascript; charset=utf-8'],
+  '/sound.js': ['sound.js', 'text/javascript; charset=utf-8'],
+  '/voice.js': ['voice.js', 'text/javascript; charset=utf-8'],
 };
 
 // 30件 × 200文字のひとことが、日本語（1文字3バイト）で約22KBになる。それより余裕をもたせた上限

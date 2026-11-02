@@ -75,8 +75,9 @@
     .row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
     .spacer { flex: 1; }
     .label { font-weight: bold; margin: 12px 0 4px; }
-    input[type="text"] {
+    input[type="text"], input[type="date"] {
       width: 100%;
+      max-width: 420px;
       min-height: 48px;
       padding: 6px 12px;
       font: inherit;
@@ -136,6 +137,7 @@
       border-radius: 6px;
       vertical-align: middle;
     }
+    .screen .meet { font-size: 24px; color: #f2c75c; margin: 0 0 12px; }
     .screen .post { border-top: 2px dashed #f3ecd2; padding-top: 12px; }
     .screen .post .who { font-size: 20px; color: #9fd8a6; margin: 0; }
     .screen .post .card { font-size: 30px; font-weight: bold; margin: 0; overflow-wrap: anywhere; }
@@ -151,24 +153,44 @@
     <h1>ちゃのま</h1>
     <div class="row" id="roles" role="group" aria-label="だれが使いますか"></div>
     <span class="spacer"></span>
+    <button id="sound" type="button" aria-pressed="false">音を消す</button>
     <button id="evening" class="primary">夜7時にする</button>
   </header>
 
   <main>
     <section id="post-view" class="panel" aria-labelledby="post-title">
       <h2 id="post-title" tabindex="-1"></h2>
+      <p class="label" id="animals-label">キャラ（どうぶつ）をえらぶ</p>
+      <div class="row" id="animals" role="group" aria-labelledby="animals-label"></div>
+      <p class="label"><label for="nick">ニックネーム（なくてもよい）</label></p>
+      <input id="nick" type="text" maxlength="20" autocomplete="off">
       <p class="label" id="topics-label">きょうのお題</p>
       <div class="row" id="topics" role="group" aria-labelledby="topics-label"></div>
+      <p class="label" id="wishes-label">つぎに会う日の希望</p>
+      <div class="row" id="wishes" role="group" aria-labelledby="wishes-label"></div>
       <p class="label" id="cards-label">札をえらぶ</p>
       <div class="row" id="cards" role="group" aria-labelledby="cards-label"></div>
       <p class="label" id="headlines-label">見出し（えらばなくてもよい）</p>
       <div class="row" id="headlines" role="group" aria-labelledby="headlines-label"></div>
       <p class="label"><label for="text">ひとこと（書かなくてもよい）</label></p>
       <input id="text" type="text" maxlength="200" autocomplete="off">
+      <div id="voice-box" hidden>
+        <div class="row" style="margin-top: 12px">
+          <button id="voice" type="button">声で入れる</button>
+        </div>
+        <p class="note">声は保存しません。音声認識はブラウザの機能で、提供元のサーバーに送られる場合があります。整えるために話の文章はClaudeに送ります。</p>
+        <p class="note">声は文字になって、入力欄に入ります。まちがいがないか見てから、「おくる」を押してください。</p>
+      </div>
       <div class="row" style="margin-top: 12px">
         <button id="send" class="primary">おくる</button>
       </div>
       <p id="msg" class="msg" role="status"></p>
+    </section>
+
+    <section id="date-view" class="panel" aria-labelledby="date-title">
+      <h2 id="date-title">つぎに会う日</h2>
+      <p class="note">日にちが決まっていれば、えらんでください（決まっていなくてもよい）。</p>
+      <input id="next-date" type="date" aria-labelledby="date-title">
     </section>
 
     <section id="list-view" class="panel" aria-labelledby="list-title">

@@ -1,7 +1,7 @@
-// safe.js のテスト。実行: node --test test/
+// safe.js のテスト。実行: node --test
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanPosts, checkNews, loadState, serializeState, MAX_POSTS } from '../safe.js';
+import { cleanPosts, cleanDate, checkNews, loadState, serializeState, MAX_POSTS } from '../safe.js';
 
 const posts = [
   { id: 'p1', who: 'おばあちゃん', topic: 'ごはん', headline: 'おいしかった', text: 'きょうは煮物を作った' },
@@ -293,4 +293,19 @@ test('弾く(再レビュー): opening と closing の日数', () => {
   assert.equal(checkNews({ ...named('次の話です。'), opening: 'あと三日で会えます。' }, namePosts).ok, false);
   assert.equal(checkNews(named('次の話です。', 'あと3日で会えます。'), namePosts).ok, false);
   assert.equal(checkNews(named('次の話です。', '今日は一日おつかれさまでした。'), namePosts).ok, true);
+});
+
+// ---- cleanDate（つぎに会う日だけの検査） ----
+test('cleanDate: 正しい日付と、未指定を通す', () => {
+  assert.deepEqual(cleanDate('2026-11-20'), { ok: true, value: '2026-11-20' });
+  assert.deepEqual(cleanDate(''), { ok: true, value: undefined });
+  assert.deepEqual(cleanDate(undefined), { ok: true, value: undefined });
+});
+for (const bad of ['来週', '2026-02-31', '9999-12-31', '2026-1-5', 20261120, ['2026-11-20']]) {
+  test(`cleanDate: 弾く - ${JSON.stringify(bad)}`, () => assert.equal(cleanDate(bad).ok, false));
+}
+
+test('loadState: 投稿が0件でも、つぎに会う日は読み戻せる', () => {
+  const s = loadState(serializeState([], '2026-11-20'));
+  assert.deepEqual(s, { posts: [], nextDate: '2026-11-20' });
 });

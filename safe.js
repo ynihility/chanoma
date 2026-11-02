@@ -50,6 +50,16 @@ function optionalDate(value) {
   return value;
 }
 
+// つぎに会う日だけを検査したいとき（投稿がまだ0件のときなど）に使う。成功なら {ok:true, value}（未指定なら value は undefined）
+export function cleanDate(value) {
+  try {
+    return { ok: true, value: optionalDate(value) };
+  } catch (e) {
+    if (e instanceof Invalid) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
 // 投稿1件を検査し、決まった項目だけを持つ新しいオブジェクトに作り直す。
 // 余計な項目や __proto__ のような変なキーを持ち込ませないため、受け取ったオブジェクトはそのまま使わない
 function buildPost(p, ids) {
