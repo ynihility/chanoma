@@ -338,11 +338,13 @@ function buildSteps(news, posts, nextDate) {
   ];
 }
 
+// 司会のつなぎの言葉。テレ吉（飾り）の横に吹き出しを出し、中に「AI」の札を入れる（家族の短冊と見分けるため）
 function hostLine(text) {
-  const p = el('p', undefined, 'host');
-  // 司会のテレ吉（飾り）。つなぎの言葉の左に出る
-  p.append(spriteCanvas('テレ吉', 4, undefined, { shadow: true }), el('span', 'AI', 'ai-chip'), document.createTextNode(text));
-  return p;
+  const row = el('div', undefined, 'host-row');
+  const bubble = el('p', undefined, 'host');
+  bubble.append(el('span', 'AI', 'ai-chip'), document.createTextNode(text));
+  row.append(spriteCanvas('テレ吉', 4, undefined, { shadow: true }), bubble);
+  return row;
 }
 
 function renderStep() {
@@ -380,7 +382,8 @@ function showError(message) {
   setView(true);
   show = { steps: [{ kind: 'closing', host: message }], index: 0 };
   const screen = $('screen');
-  screen.replaceChildren(el('p', '番組を作れませんでした', 'corner'), el('p', message, 'host'));
+  // アプリ自身のお知らせなので、AI の吹き出し（host）にはしない
+  screen.replaceChildren(el('p', '番組を作れませんでした', 'corner'), el('p', message, 'notice'));
   $('next').hidden = true;
 }
 
