@@ -40,6 +40,22 @@ const MAX_BODY_BYTES = 32 * 1024;
 // 同時に Claude を呼べる数。万一ほかから呼ばれ続けても、API の料金が一気に減らないようにする
 const MAX_IN_FLIGHT = 3;
 let inFlight = 0;
+// 時間あたりの呼び出し上限。撮影スクリプトの暴走や連打で、API の料金を使い切らないようにする。
+// テストでは少ない回数で上限に届くように、環境変数で差し替えられる
+const RATE_PER_MINUTE = Number(process.env.CHANOMA_RATE_PER_MINUTE) || 10;
+const RATE_PER_DAY = Number(process.env.CHANOMA_RATE_PER_DAY) || 100;
+const RATE_LIMITED = '番組を作る回数が上限に達しました。しばらく待ってから、もう一度お試しください。';
+// Claude を呼んだ時刻（ミリ秒）を古い順に持つ。24時間より前のものは捨てる
+const callTimes = [];
+
+// 上限の中なら今回の分を数えて true、上限を超えるなら数えずに false を返す
+function takeRateSlot(now = Date.now()) {
+  while (callTimes.length > 0 && callTimes[0] <= now - 86_400_000) callTimes.shift();
+  const lastMinute = callTimes.filter((t) => t > now - 60_000).length;
+  if (callTimes.length >= RATE_PER_DAY || lastMinute >= RATE_PER_MINUTE) return false;
+  callTimes.push(now);
+  return true;
+}
 // 自分のアドレスあてのリクエストだけ受ける。外のサイトの名前が一時的に自分のパソコンを指すようにして
 // 呼びつける攻撃（DNS リバインディング）では、Host がそのサイト名になるので弾ける
 const ALLOWED_HOSTS = new Set([`${HOST}:${PORT}`, `localhost:${PORT}`]);
@@ -223,6 +239,8 @@ async function handleNews(req, res) {
   const data = cleanPosts(input);
   if (!data.ok) throw new PublicError(400, data.error);
   if (inFlight >= MAX_IN_FLIGHT) throw new PublicError(429, '番組の準備が混み合っています。少し待ってから、もう一度お試しください。');
+  // 同時数の確認のあとに数える。混雑で断った分は、回数に入れない
+  if (!takeRateSlot()) throw new PublicError(429, RATE_LIMITED);
   // 画面側が途中でやめた（接続が切れた）ら、Claude への問い合わせも止める
   const abort = new AbortController();
   res.on('close', () => {

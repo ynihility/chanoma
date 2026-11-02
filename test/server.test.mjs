@@ -29,7 +29,10 @@ const goodNews = {
 // 偽 API の挙動。テストごとに差し替える
 let fakeMode = 'good';
 let lastReq = null;
+// 偽 API に届いたリクエストの数（上限で断った分が届いていないことの確認に使う）
+let fakeCalls = 0;
 const fake = http.createServer((req, res) => {
+  fakeCalls++;
   const chunks = [];
   req.on('data', (c) => chunks.push(c));
   req.on('end', () => {
@@ -96,7 +99,8 @@ function check(name, ok, detail = '') {
 }
 
 await new Promise((r) => fake.listen(FAKE_PORT, '127.0.0.1', r));
-let app = startApp({ ANTHROPIC_API_KEY: FAKE_KEY });
+// 既存の確認は呼び出しが多いので、回数の上限は大きくしておく（上限そのものは、下の専用の起動で確かめる）
+let app = startApp({ ANTHROPIC_API_KEY: FAKE_KEY, CHANOMA_RATE_PER_MINUTE: '1000', CHANOMA_RATE_PER_DAY: '1000' });
 let appLog = '';
 app.stdout.on('data', (d) => (appLog += d));
 app.stderr.on('data', (d) => (appLog += d));
@@ -272,6 +276,34 @@ check('CHANOMA_API_BASE を指定すると、テスト用の接続先だと表�
 
 // --- ログに APIキーが出ていない ---
 check('ログに APIキーの値が出ていない', !appLog.includes(FAKE_KEY));
+app.kill();
+await wait(300);
+
+// --- 時間あたりの呼び出し上限 ---
+// 1分あたり3回・1日あたり5回に絞って起動する。偽の API なので、本物の料金はかからない
+fakeMode = 'good';
+const fakeCallsBefore = fakeCalls;
+app = startApp({ ANTHROPIC_API_KEY: FAKE_KEY, CHANOMA_RATE_PER_MINUTE: '3', CHANOMA_RATE_PER_DAY: '5' });
+await wait(800);
+const minuteCodes = [];
+for (let i = 0; i < 4; i++) minuteCodes.push((await call('POST', '/api/news', { posts })).status);
+check('1分あたりの上限: 3回は 200、4回目は 429', minuteCodes.join(',') === '200,200,200,429', minuteCodes.join(','));
+r = await call('POST', '/api/news', { posts });
+check('上限超えの返事は固定文で、内部情報を含まない', r.status === 429 && r.json?.error?.includes('上限に達しました') && !/MINUTE|DAY|CHANOMA|ANTHROPIC|\d+回/.test(r.text), r.text);
+check('上限で断った分は、偽の API に届いていない', fakeCalls - fakeCallsBefore === 3, String(fakeCalls - fakeCallsBefore));
+r = await call('POST', '/api/news', { posts: [] });
+check('上限に達したあとでも、入力の検査が先に動いて 400 を返す', r.status === 400, `${r.status}`);
+r = await call('GET', '/');
+check('画面のファイルの配信は、上限の対象外', r.status === 200, `${r.status}`);
+app.kill();
+await wait(300);
+
+// 1日の上限: 1分の上限を大きくして、1日の5回だけで止まることを確かめる
+app = startApp({ ANTHROPIC_API_KEY: FAKE_KEY, CHANOMA_RATE_PER_MINUTE: '100', CHANOMA_RATE_PER_DAY: '5' });
+await wait(800);
+const dayCodes = [];
+for (let i = 0; i < 6; i++) dayCodes.push((await call('POST', '/api/news', { posts })).status);
+check('1日あたりの上限: 5回は 200、6回目は 429', dayCodes.join(',') === '200,200,200,200,200,429', dayCodes.join(','));
 app.kill();
 await wait(300);
 
