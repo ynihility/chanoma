@@ -11,7 +11,10 @@ You need Node.js (tested with v24) and an Anthropic API key. There are no npm de
 1. Open a terminal, **set the API key only in that window** (never write it into a file), and start the server:
    ```powershell
    cd chanoma
-   $env:ANTHROPIC_API_KEY = Read-Host "Paste your API key"
+   $s = Read-Host "Paste your API key" -AsSecureString
+   $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)
+   $env:ANTHROPIC_API_KEY = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b)
+   [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b); Remove-Variable s, b
    node server.mjs
    ```
 2. Open <http://127.0.0.1:8787/> in a browser.
@@ -57,7 +60,10 @@ Node.js（v24 で確認）と、Anthropic の API キーが必要です。npm �
 1. ターミナルを開き、**そのウィンドウだけに** API キーを設定して（ファイルには書かないでください）、サーバーを起動します。
    ```powershell
    cd chanoma
-   $env:ANTHROPIC_API_KEY = Read-Host "APIキーを貼り付けてEnter"
+   $s = Read-Host "APIキーを貼り付けてEnter" -AsSecureString
+   $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)
+   $env:ANTHROPIC_API_KEY = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b)
+   [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b); Remove-Variable s, b
    node server.mjs
    ```
 2. ブラウザで <http://127.0.0.1:8787/> を開きます。
