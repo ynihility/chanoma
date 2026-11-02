@@ -679,6 +679,8 @@
     .screen .post .card { font-size: 38px; font-weight: 800; line-height: 1.4; margin: 0; overflow-wrap: anywhere; }
     .screen .post .text { font-size: 32px; line-height: 1.6; margin: var(--gap-2) 0 0; overflow-wrap: anywhere; }
     .screen .fade { position: relative; z-index: 1; animation: fade-in 350ms ease-out; }
+    /* 演出（モザイク・砂嵐）の中で入れ替えるときは、演出が出入りを受け持つので、ふわっと出る動きは付けない */
+    .screen .fade.still { animation: none; }
     @keyframes fade-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 
     /* 番組を待つあいだの画面: 試験放送の色の帯を敷いて、真ん中にテレ吉の札を置く。

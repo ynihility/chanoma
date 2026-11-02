@@ -435,10 +435,10 @@ function setScreen(...nodes) {
   screen.append(...nodes);
 }
 
-// いまの場面を、画面にすぐ描く
-function renderStep() {
+// いまの場面を、画面にすぐ描く。still が true のときは、中身がふわっと出る動きを付けない（演出の中で入れ替えるとき）
+function renderStep(still = false) {
   const step = show.steps[show.index];
-  const wrap = el('div', undefined, 'fade');
+  const wrap = el('div', undefined, still ? 'fade still' : 'fade');
   if (step.kind === 'segment') {
     wrap.append(el('p', CORNER_TITLES[step.corner] ?? '', 'corner'), hostLine(step.host));
     if (step.corner === 'つぎ') wrap.append(el('p', meetLine(step.nextDate), 'meet'));
@@ -478,18 +478,19 @@ function wipeTo(kind, paint) {
     paint();
     return;
   }
-  const mine = fx.playWipe($('screen'), kind, paint);
+  // 演出が出入りを受け持つので、中身には、ふわっと出る動きを付けない
+  const mine = fx.playWipe($('screen'), kind, () => paint(true));
   run = mine;
   mine.done.then(() => {
     if (run === mine) run = null;
   });
 }
 
-// 場面を切り替える。コーナーが変わるときは、画面にモザイクの演出をはさむ
+// 場面を切り替える。文が出る前に、画面に短い演出をはさむ（どちらも1秒たらず）。
+// コーナーが変わるときはモザイク、同じコーナーの中では砂嵐
 function goStep(from) {
   updateNext();
-  if (cornerKey(from) === cornerKey(show.steps[show.index])) renderStep();
-  else wipeTo('mosaic', renderStep);
+  wipeTo(cornerKey(from) === cornerKey(show.steps[show.index]) ? 'snow' : 'mosaic', renderStep);
 }
 
 function showError(message) {
