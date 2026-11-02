@@ -6,7 +6,9 @@ export const MAX_POSTS = 30;
 export const MAX_HOST_CHARS = 80;
 export const MAX_GREETING_CHARS = 100;
 export const TODAY_TOPICS = ['ごはん', 'そら', 'したこと', 'みつけた'];
-export const NEXT_TOPICS = ['なにしたい', 'どこ行きたい', 'なに食べたい'];
+// 「いつ会いたい」は、日付で答える（wishDate）。ほかの3つは札で答える
+export const WISH_DATE_TOPIC = 'いつ会いたい';
+export const NEXT_TOPICS = [WISH_DATE_TOPIC, 'なにしたい', 'どこ行きたい', 'なに食べたい'];
 export const HEADLINES = ['うれしかった', 'おいしかった', 'びっくり', 'なつかしい'];
 export const ANIMALS = ['ねこ', 'いぬ', 'うさぎ', 'くま', 'すずめ', 'かめ'];
 // 放送の順番。この並びより前に戻るコーナーがあれば、番組として受け取らない
@@ -38,9 +40,8 @@ function optionalChoice(value, choices, label) {
   return value;
 }
 
-function optionalDate(value) {
+function optionalDate(value, message = 'つぎに会う日の日付が正しくありません。') {
   if (value === undefined || value === null || value === '') return undefined;
-  const message = 'つぎに会う日の日付が正しくありません。';
   if (typeof value !== 'string' || !DATE_PATTERN.test(value)) fail(message);
   // 2026-02-31 のような、形だけ合っている存在しない日付も弾く
   const d = new Date(`${value}T00:00:00Z`);
@@ -70,6 +71,10 @@ function buildPost(p, ids) {
   if (!who) fail('よびかたを入れてください。');
   const topic = optionalChoice(p.topic, [...TODAY_TOPICS, ...NEXT_TOPICS], 'お題');
   if (!topic) fail('お題を選んでください。');
+  // 会いたい日の希望は、「いつ会いたい」のときだけ、日付で答える
+  const wishDate = optionalDate(p.wishDate, '会いたい日の日付が正しくありません。');
+  if (topic === WISH_DATE_TOPIC && !wishDate) fail('会いたい日を入れてください。');
+  if (topic !== WISH_DATE_TOPIC && wishDate) fail('会いたい日は、「いつ会いたい」のときだけ入れられます。');
   const post = {
     id: p.id,
     who,
@@ -77,6 +82,7 @@ function buildPost(p, ids) {
     animal: optionalChoice(p.animal, ANIMALS, 'どうぶつ'),
     topic,
     card: optionalText(p.card, 30, '札'),
+    wishDate,
     headline: optionalChoice(p.headline, HEADLINES, '見出し'),
     text: optionalText(p.text, 200, 'ひとこと'),
   };
@@ -117,15 +123,38 @@ export function loadState(raw) {
   }
   if (!data || typeof data !== 'object' || data.v !== 1) return null;
   try {
-    return buildPosts(data, true);
+    const state = buildPosts(data, true);
+    // よびかたが壊れていても、投稿は捨てない（初めの名前に戻すだけ）
+    const roles = data.roles === undefined ? null : cleanRoles(data.roles);
+    return roles?.ok ? { ...state, roles: roles.roles } : state;
   } catch (e) {
     if (e instanceof Invalid) return null;
     throw e;
   }
 }
 
-export function serializeState(posts, nextDate) {
-  return JSON.stringify(nextDate ? { v: 1, posts, nextDate } : { v: 1, posts });
+// 家族のよびかた。画面の切り替えボタンになる。本人が好きな名前に変えられる
+export const DEFAULT_ROLES = ['おばあちゃん', 'おじいちゃん', 'おかあさん', 'おとうさん', 'まご'];
+
+// 変えたよびかたを検査する。5つそろっていて、空でなく、重ならないこと。成功なら {ok:true, roles}
+export function cleanRoles(input) {
+  try {
+    if (!Array.isArray(input) || input.length !== DEFAULT_ROLES.length) fail('よびかたの数が正しくありません。');
+    const roles = input.map((r) => {
+      const name = optionalText(r, 20, 'よびかた');
+      if (!name) fail('よびかたを空にはできません。');
+      return name;
+    });
+    if (new Set(roles).size !== roles.length) fail('同じよびかたが重なっています。ちがう名前にしてください。');
+    return { ok: true, roles };
+  } catch (e) {
+    if (e instanceof Invalid) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+export function serializeState(posts, nextDate, roles) {
+  return JSON.stringify({ v: 1, posts, ...(nextDate ? { nextDate } : {}), ...(roles ? { roles } : {}) });
 }
 
 // ---- Claude が返した番組の検査 ----

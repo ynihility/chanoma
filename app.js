@@ -1,14 +1,12 @@
 // 画面の動き。投稿をためて、夜7時に /api/news で番組を作ってもらい、テレビに順に映す。
 // 画面に出す文字はすべて textContent で入れる。innerHTML は使わない。
 import {
-  STORAGE_KEY, MAX_POSTS, TODAY_TOPICS, NEXT_TOPICS, HEADLINES, ANIMALS,
-  cleanPosts, cleanDate, checkNews, loadState, serializeState,
+  STORAGE_KEY, MAX_POSTS, TODAY_TOPICS, NEXT_TOPICS, WISH_DATE_TOPIC, HEADLINES, ANIMALS,
+  DEFAULT_ROLES, cleanPosts, cleanDate, cleanRoles, checkNews, loadState, serializeState,
 } from './safe.js';
 import { play, setMuted } from './sound.js';
 import { voiceSupported, listen } from './voice.js';
 
-// 1台で実演するために、ここで使う人（家族でのよびかた）を切り替える
-const ROLES = ['おばあちゃん', 'おじいちゃん', 'おかあさん', 'おとうさん', 'まご'];
 // お題ごとの札。「つぎに会う日」の希望も同じ形で持つ
 const CARDS = {
   'ごはん': ['ごはん', 'パン', 'めん', 'おかず', 'おやつ', 'のみもの'],
@@ -42,8 +40,15 @@ try {
   // 保存が使えない環境でも、画面は動かす
 }
 
-let role = ROLES[0];
-const pick = { topic: '', card: '', headline: '' };
+// 1台で実演するために、ここで使う人（家族でのよびかた）を切り替える。よびかたは本人が好きな名前に変えられる
+const roles = () => state.roles ?? DEFAULT_ROLES;
+// 保存データのうち、投稿以外（つぎに会う日・よびかた）を引き継ぐための部分
+const keep = () => ({
+  ...(state.nextDate ? { nextDate: state.nextDate } : {}),
+  ...(state.roles ? { roles: state.roles } : {}),
+});
+let role = roles()[0];
+const pick ={ topic: '', card: '', headline: '' };
 // キャラ（どうぶつ）とニックネームは、よびかたごとに覚える。前に投稿していれば、その内容を引き継ぐ
 const profiles = {};
 for (const p of state.posts) profiles[p.who] = { animal: p.animal ?? '', nick: p.name ?? '' };
@@ -58,7 +63,7 @@ function say(message) {
 // 保存できたら true。使えない環境や容量いっぱいのときは false
 function save() {
   try {
-    localStorage.setItem(STORAGE_KEY, serializeState(state.posts, state.nextDate));
+    localStorage.setItem(STORAGE_KEY, serializeState(state.posts, state.nextDate, state.roles));
     return true;
   } catch {
     return false;
@@ -101,6 +106,10 @@ function pickTopic(v) {
 
 function renderForm() {
   $('post-title').textContent = `${role}のひとこと`;
+  // 「いつ会いたい」のときは、札のかわりに日付をえらぶ
+  const askDate = pick.topic === WISH_DATE_TOPIC;
+  $('cards-box').hidden = askDate;
+  $('wish-date-box').hidden = !askDate;
   renderChoices('topics', TODAY_TOPICS, pick.topic, pickTopic);
   renderChoices('wishes', NEXT_TOPICS, pick.topic, pickTopic);
   renderChoices('cards', CARDS[pick.topic] ?? [], pick.card, (v) => {
@@ -116,26 +125,58 @@ function renderForm() {
     renderForm();
   });
   if ($('nick').value !== profile().nick) $('nick').value = profile().nick;
+  // よびかたの入力欄は、人を切り替えたときに合わせる（入力中は触らない）
+  if (document.activeElement !== $('rename') && $('rename').value !== role) $('rename').value = role;
 }
 
 function renderRoles() {
   const box = $('roles');
+  // ボタンは最初に1回だけ作り、名前が変わったときは文字だけ入れ替える（フォーカスを保つため）
   if (box.children.length === 0) {
-    for (const r of ROLES) {
-      const b = el('button', r);
+    roles().forEach((_, i) => {
+      const b = el('button');
       b.type = 'button';
       b.addEventListener('click', () => {
         play('tap');
         cancelVoice();
-        role = r;
+        role = roles()[i];
         say('');
         renderRoles();
         renderForm();
       });
       box.append(b);
-    }
+    });
   }
-  for (const b of box.children) b.setAttribute('aria-pressed', String(b.textContent === role));
+  [...box.children].forEach((b, i) => {
+    b.textContent = roles()[i];
+    b.setAttribute('aria-pressed', String(roles()[i] === role));
+  });
+}
+
+// よびかたを好きな名前に変える。前の投稿の名前も、まとめて新しい名前に直す
+function renameRole() {
+  const name = $('rename').value.trim();
+  const old = role;
+  if (name === old) return;
+  const checked = cleanRoles(roles().map((r) => (r === old ? name : r)));
+  if (!checked.ok) {
+    play('error');
+    say(checked.error);
+    $('rename').value = old;
+    return;
+  }
+  state = { ...state, roles: checked.roles, posts: state.posts.map((p) => (p.who === old ? { ...p, who: name } : p)) };
+  if (profiles[old]) {
+    profiles[name] = profiles[old];
+    delete profiles[old];
+  }
+  role = name;
+  const saved = save();
+  play('send');
+  say(saved ? `「${name}」にかえました。` : `「${name}」にかえました。ただし、この端末には保存できませんでした。画面を閉じると消えます。`);
+  renderRoles();
+  renderForm();
+  renderPosts();
 }
 
 function renderPosts() {
@@ -147,12 +188,13 @@ function renderPosts() {
   for (const p of state.posts) {
     const li = el('li');
     const body = el('span', undefined, 'body');
-    const parts = [p.animal ? `【${p.animal}】` : '', p.who, p.topic, p.card, p.headline, p.text].filter(Boolean);
+    const wish = p.wishDate ? monthDay(p.wishDate) : '';
+    const parts = [p.animal ? `【${p.animal}】` : '', p.who, p.topic, p.card, wish, p.headline, p.text].filter(Boolean);
     body.textContent = parts.join('　');
     const del = el('button', '消す');
     del.type = 'button';
     // 「消す」が何件も並ぶので、読み上げでどの投稿か分かるように名前を付ける
-    del.setAttribute('aria-label', `${p.who}の「${p.card ?? p.topic}」の投稿を消す`);
+    del.setAttribute('aria-label', `${p.who}の「${p.card ?? (p.wishDate ? monthDay(p.wishDate) : p.topic)}」の投稿を消す`);
     del.addEventListener('click', () => {
       state.posts = state.posts.filter((x) => x.id !== p.id);
       save();
@@ -170,9 +212,17 @@ const newId = () => `p${Math.random().toString(36).slice(2, 10)}${Date.now().toS
 
 function submitPost() {
   cancelVoice();
-  if (!pick.topic || !pick.card) {
+  const askDate = pick.topic === WISH_DATE_TOPIC;
+  const wishDate = askDate ? $('wish-date').value : '';
+  if (!pick.topic || (askDate ? !wishDate : !pick.card)) {
     play('error');
-    say('お題と札を、えらんでください。');
+    say(askDate ? '会いたい日を、えらんでください。' : 'お題と札を、えらんでください。');
+    return;
+  }
+  // 会いたい日の希望は、今日より前の日にちにはできない
+  if (askDate && daysUntil(wishDate) < 0) {
+    play('error');
+    say('今日より前の日にちは、えらべません。');
     return;
   }
   if (state.posts.length >= MAX_POSTS) {
@@ -182,7 +232,7 @@ function submitPost() {
   }
   const post = {
     id: newId(), who: role, name: profile().nick, animal: profile().animal,
-    topic: pick.topic, card: pick.card, headline: pick.headline, text: $('text').value,
+    topic: pick.topic, card: askDate ? '' : pick.card, wishDate, headline: pick.headline, text: $('text').value,
   };
   const r = cleanPosts({ posts: [...state.posts, post], nextDate: state.nextDate });
   if (!r.ok) {
@@ -190,11 +240,12 @@ function submitPost() {
     say(r.error);
     return;
   }
-  state = { posts: r.posts, ...(r.nextDate ? { nextDate: r.nextDate } : {}) };
+  state = { posts: r.posts, ...keep() };
   const saved = save();
   play('send');
   pick.topic = pick.card = pick.headline = '';
   $('text').value = '';
+  $('wish-date').value = '';
   say(saved ? 'おくりました。' : 'おくりました。ただし、この端末には保存できませんでした。画面を閉じると消えます。');
   renderForm();
   renderPosts();
@@ -236,13 +287,23 @@ function daysUntil(dateText) {
   return Math.round((new Date(y, m - 1, d) - today) / 86400000);
 }
 
-// 「つぎに会う日」の1行。日数は Claude には言わせず、ここで数えて出す
+// 「11月20日」の形にする
+function monthDay(dateText) {
+  const [, m, d] = dateText.split('-').map(Number);
+  return `${m}月${d}日`;
+}
+
+// 日付のうしろに付ける日数。日数は Claude には言わせず、ここで数えて出す（過ぎた日には付けない）
+function daysSuffix(dateText) {
+  const left = daysUntil(dateText);
+  if (left < 0) return '';
+  return left === 0 ? '（きょうです）' : `（あと${left}日）`;
+}
+
+// 「つぎに会う日」の1行
 function meetLine(dateText) {
   if (!dateText) return 'つぎに会う日は、まだ決まっていません。';
-  const [, m, d] = dateText.split('-').map(Number);
-  const left = daysUntil(dateText);
-  if (left < 0) return `つぎに会う日：${m}月${d}日`;
-  return left === 0 ? `つぎに会う日：${m}月${d}日（きょうです）` : `つぎに会う日：${m}月${d}日（あと${left}日）`;
+  return `つぎに会う日：${monthDay(dateText)}${daysSuffix(dateText)}`;
 }
 
 // 番組を、画面に映す順番の一覧にする。本文は投稿のほうから取り、Claude の返事からは取らない
@@ -274,7 +335,9 @@ function renderStep() {
     const name = p.name ? `${p.who}（${p.name}）` : p.who;
     box.append(el('p', p.animal ? `【${p.animal}】${name}` : name, 'who'));
     // つぎに会う日の希望は「なにしたい　おでかけ」のように、お題と札を並べて出す
-    const cardLine = NEXT_TOPICS.includes(p.topic) ? [p.topic, p.card] : [p.card];
+    // 「いつ会いたい」は、札のかわりに日付と、あと何日かを出す
+    const wish = p.wishDate ? `${monthDay(p.wishDate)}${daysSuffix(p.wishDate)}` : p.card;
+    const cardLine = NEXT_TOPICS.includes(p.topic) ? [p.topic, wish] : [p.card];
     box.append(el('p', [...cardLine, p.headline].filter(Boolean).join('　'), 'card'));
     if (p.text) box.append(el('p', p.text, 'text'));
     wrap.append(box);
@@ -351,10 +414,14 @@ $('nick').addEventListener('input', () => {
   profile().nick = $('nick').value;
 });
 $('next-date').addEventListener('change', changeDate);
+$('rename-go').addEventListener('click', renameRole);
+$('rename').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) renameRole();
+});
 $('clear').addEventListener('click', () => {
   if (state.posts.length === 0) return;
   if (!confirm('きょうの投稿を、ぜんぶ消します。よろしいですか？')) return;
-  state = state.nextDate ? { posts: [], nextDate: state.nextDate } : { posts: [] };
+  state = { posts: [], ...keep() };
   save();
   renderPosts();
 });
@@ -435,7 +502,9 @@ $('voice-box').hidden = !voiceSupported();
 {
   const t = new Date();
   const pad = (n) => String(n).padStart(2, '0');
-  $('next-date').min = `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`;
+  const today = `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`;
+  $('next-date').min = today;
+  $('wish-date').min = today;
 }
 if (state.nextDate) $('next-date').value = state.nextDate;
 

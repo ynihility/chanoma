@@ -309,3 +309,74 @@ test('loadState: 投稿が0件でも、つぎに会う日は読み戻せる', ()
   const s = loadState(serializeState([], '2026-11-20'));
   assert.deepEqual(s, { posts: [], nextDate: '2026-11-20' });
 });
+
+// ---- 会いたい日の希望（いつ会いたい） ----
+const wishPost = (o = {}) => ({ id: 'w1', who: 'おじいちゃん', topic: 'いつ会いたい', wishDate: '2026-11-23', ...o });
+test('いつ会いたい: 日付つきの投稿を通す。札はなくてよい', () => {
+  const r = cleanPosts({ posts: [wishPost()] });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.posts[0].wishDate, '2026-11-23');
+  assert.equal('card' in r.posts[0], false);
+});
+for (const [name, p] of [
+  ['日付がない', wishPost({ wishDate: undefined })],
+  ['存在しない日付', wishPost({ wishDate: '2026-02-31' })],
+  ['範囲外の年', wishPost({ wishDate: '2101-01-01' })],
+  ['日付が文字列でない', wishPost({ wishDate: 20261123 })],
+  ['ほかのお題に日付', wishPost({ topic: 'ごはん' })],
+  ['札のお題に日付', wishPost({ topic: 'なにしたい', card: 'おでかけ' })],
+]) {
+  test(`いつ会いたい: 弾く - ${name}`, () => assert.equal(cleanPosts({ posts: [p] }).ok, false));
+}
+test('いつ会いたい: 番組では「つぎ」コーナーにだけ入れられる', () => {
+  const ps = [{ id: 'a', who: 'まご', topic: 'そら' }, wishPost({ id: 'w', who: 'おじいちゃん' })];
+  const news = (corner) => ({
+    opening: 'こんばんは。',
+    segments: [
+      { corner: 'ひとこと', from: 'a', host: 'まごさんのひとことです。' },
+      { corner, from: 'w', host: '会いたい日の希望です。' },
+    ],
+    closing: 'おやすみなさい。',
+  });
+  assert.equal(checkNews(news('つぎ'), cleanPosts({ posts: ps }).posts).ok, true);
+  assert.equal(checkNews(news('ひとこと'), cleanPosts({ posts: ps }).posts).ok, false);
+});
+test('いつ会いたい: 保存して読み戻せる', () => {
+  const clean = cleanPosts({ posts: [wishPost()] });
+  assert.equal(loadState(serializeState(clean.posts)).posts[0].wishDate, '2026-11-23');
+});
+
+// ---- よびかたの変更 ----
+import { DEFAULT_ROLES, cleanRoles } from '../safe.js';
+test('cleanRoles: 好きな名前に変えた5つを通し、前後の空白は除く', () => {
+  const r = cleanRoles(['ばあば', ' じいじ ', 'ママ', 'パパ', 'たろう']);
+  assert.equal(r.ok, true, r.error);
+  assert.deepEqual(r.roles, ['ばあば', 'じいじ', 'ママ', 'パパ', 'たろう']);
+});
+for (const [name, v] of [
+  ['5つではない', ['a', 'b']],
+  ['配列ではない', 'ばあば'],
+  ['空の名前', ['ばあば', '', 'a', 'b', 'c']],
+  ['空白だけ', ['ばあば', '   ', 'a', 'b', 'c']],
+  ['重なる名前', ['ばあば', 'ばあば', 'a', 'b', 'c']],
+  ['21文字', ['あ'.repeat(21), 'a', 'b', 'c', 'd']],
+  ['改行入り', ['ば\nあば', 'a', 'b', 'c', 'd']],
+  ['ゼロ幅文字', ['ば​あば', 'a', 'b', 'c', 'd']],
+  ['文字列でない', [1, 2, 3, 4, 5]],
+]) {
+  test(`cleanRoles: 弾く - ${name}`, () => assert.equal(cleanRoles(v).ok, false));
+}
+test('cleanRoles: 初めの名前は5つで、重ならない', () => {
+  assert.equal(DEFAULT_ROLES.length, 5);
+  assert.equal(cleanRoles(DEFAULT_ROLES).ok, true);
+});
+test('loadState: 変えたよびかたを保存して読み戻せる', () => {
+  const raw = serializeState([], undefined, ['ばあば', 'じいじ', 'ママ', 'パパ', 'たろう']);
+  assert.deepEqual(loadState(raw).roles, ['ばあば', 'じいじ', 'ママ', 'パパ', 'たろう']);
+});
+test('loadState: よびかたが壊れていても、投稿は捨てない', () => {
+  const raw = JSON.stringify({ v: 1, posts: [{ id: 'a', who: 'まご', topic: 'そら' }], roles: ['a', 'a', 'b', 'c', 'd'] });
+  const s = loadState(raw);
+  assert.equal(s.posts.length, 1);
+  assert.equal('roles' in s, false);
+});
