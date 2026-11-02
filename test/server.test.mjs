@@ -375,16 +375,20 @@ app.kill();
 await wait(300);
 
 // --- キー未設定 ---
+// 1分あたりの上限を3にして起動する。キーが無いまま送り続けても、回数の枠を使わないので、429 に変わらず 500 のまま
 const noKeyEnv = { ...process.env };
 delete noKeyEnv.ANTHROPIC_API_KEY;
 app = spawn('node', ['server.mjs'], {
   cwd: ROOT,
-  env: { ...noKeyEnv, PORT: String(APP_PORT), CHANOMA_API_BASE: `http://127.0.0.1:${FAKE_PORT}` },
+  env: { ...noKeyEnv, PORT: String(APP_PORT), CHANOMA_API_BASE: `http://127.0.0.1:${FAKE_PORT}`, CHANOMA_RATE_PER_MINUTE: '3' },
   stdio: 'ignore',
 });
 await wait(800);
 r = await call('POST', '/api/news', { posts });
 check('キー未設定 -> 500 で内部情報を出さない', r.status === 500 && !/ANTHROPIC|環境変数/.test(r.text), r.text);
+const noKeyCodes = [r.status];
+for (let i = 0; i < 3; i++) noKeyCodes.push((await call('POST', '/api/news', { posts })).status);
+check('キー未設定: 1分あたりの上限を3にして4回送っても、4回とも 500（429 にならない）', noKeyCodes.join(',') === '500,500,500,500', noKeyCodes.join(','));
 app.kill();
 fake.close();
 console.log(`\n結果: PASS ${pass} / FAIL ${fail}`);

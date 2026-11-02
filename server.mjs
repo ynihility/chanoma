@@ -45,7 +45,9 @@ let inFlight = 0;
 const RATE_PER_MINUTE = Number(process.env.CHANOMA_RATE_PER_MINUTE) || 10;
 const RATE_PER_DAY = Number(process.env.CHANOMA_RATE_PER_DAY) || 100;
 const RATE_LIMITED = '番組を作る回数が上限に達しました。しばらく待ってから、もう一度お試しください。';
-// Claude を呼んだ時刻（ミリ秒）を古い順に持つ。24時間より前のものは捨てる
+// Claude を呼んだ時刻を古い順に持つ。24時間より前のものは捨てる。
+// 時刻は Date.now() ではなく、戻らない時計の performance.now()（サーバーを起動してからのミリ秒）で数える。
+// パソコンの時計を合わせ直されても（進んでも戻っても）、上限の数え方が狂わないようにするため
 const callTimes = [];
 
 // Claude への1回の問い合わせを待つ長さ
@@ -54,6 +56,12 @@ const API_TIMEOUT_MS = 90_000;
 const CLIENT_WAIT_MS = 100_000;
 // 1回目にこれより長くかかったら、作り直しは間に合わないので頼まない
 const RETRY_WITHIN_MS = 45_000;
+// 作り直しの待ち時間は、画面が待つ時間の残り（CLIENT_WAIT_MS - 1回目にかかった時間 - 余裕の5秒）で決まる。
+// RETRY_WITHIN_MS を長くしすぎると、作り直しに回せる時間が足りなくなる。最低でも10秒は残る範囲かを起動時に確かめ、
+// 守られていなければ、そのまま動かさずに止める
+if (RETRY_WITHIN_MS > CLIENT_WAIT_MS - 15_000) {
+  throw new Error('RETRY_WITHIN_MS は CLIENT_WAIT_MS - 15_000 以下にしてください（作り直しの待ち時間が足りなくなります）');
+}
 const NOT_BUILT = '番組をうまく組み立てられませんでした。もう一度お試しください。';
 // 作り直しを頼むときの言い方。検査の理由には、返事の断片（投稿の文が写っていることもある）が入りうる。
 // それを投稿の囲みの外に置くと、投稿に仕込まれた指示が格上げされるので、理由の文字列は渡さず、この一覧の決まった言い方だけを選ぶ
@@ -93,7 +101,7 @@ const retryHint = (reason) => {
 };
 
 // 上限の中なら今回の分を数えて true、上限を超えるなら数えずに false を返す
-function takeRateSlot(now = Date.now()) {
+function takeRateSlot(now = performance.now()) {
   while (callTimes.length > 0 && callTimes[0] <= now - 86_400_000) callTimes.shift();
   const lastMinute = callTimes.filter((t) => t > now - 60_000).length;
   if (callTimes.length >= RATE_PER_DAY || lastMinute >= RATE_PER_MINUTE) return false;
@@ -174,20 +182,27 @@ function readBody(req) {
   });
 }
 
-// 番組を作る。検査で弾いた番組は、決まった言い方の理由を添えて1回だけ作り直させる。
-// API のエラーや、Claude が断った・途中で終わったときは作り直さない（費用と時間を増やさないため）
-// signal は、画面側が途中でやめたときに Claude への問い合わせも止めるためのもの
-async function askClaude(data, signal) {
+// API キーを環境変数から取り出す。未設定のときは、内部の事情は画面に出さず、サーバーの記録にだけ残して 500 で断る
+function requireApiKey() {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     console.error('[news] ANTHROPIC_API_KEY が設定されていません');
     throw new PublicError(500, 'サーバーの準備ができていません。管理する人に確認してください。');
   }
-  const started = Date.now();
+  return apiKey;
+}
+
+// 番組を作る。検査で弾いた番組は、決まった言い方の理由を添えて1回だけ作り直させる。
+// API のエラーや、Claude が断った・途中で終わったときは作り直さない（費用と時間を増やさないため）
+// signal は、画面側が途中でやめたときに Claude への問い合わせも止めるためのもの。
+// apiKey は、handleNews が回数の枠を数える前に requireApiKey で確かめたもの
+async function askClaude(apiKey, data, signal) {
+  // 経過時間も、パソコンの時計を合わせ直しても狂わないよう、戻らない時計（performance.now）で測る
+  const started = performance.now();
   const first = await callClaude(apiKey, data, signal, '', API_TIMEOUT_MS);
   if (first.ok) return first.news;
   console.error(`[news] 返ってきた番組が決まりに合いませんでした: ${maskFragments(first.reason)}`);
-  const elapsed = Date.now() - started;
+  const elapsed = performance.now() - started;
   if (elapsed > RETRY_WITHIN_MS) {
     console.error('[news] 時間が足りないため、作り直しは頼みません');
     throw new PublicError(502, NOT_BUILT);
@@ -198,7 +213,10 @@ async function askClaude(data, signal) {
     throw new PublicError(502, NOT_BUILT);
   }
   console.log('[news] 作り直しを1回だけ頼みます');
-  const second = await callClaude(apiKey, data, signal, retryHint(first.reason), Math.min(API_TIMEOUT_MS, CLIENT_WAIT_MS - elapsed - 5_000));
+  // 作り直しを待つ長さは、画面が待つ時間の残りに収める。下限（1秒）を付けるのは、0 だと通信がすぐ打ち切られ、
+  // 負の値だと待ち時間の指定そのものが失敗する（RangeError）ため。通常は、起動時の確かめで10秒以上が残る
+  const retryTimeout = Math.max(1_000, Math.min(API_TIMEOUT_MS, CLIENT_WAIT_MS - elapsed - 5_000));
+  const second = await callClaude(apiKey, data, signal, retryHint(first.reason), retryTimeout);
   if (second.ok) return second.news;
   console.error(`[news] 作り直した番組も決まりに合いませんでした: ${maskFragments(second.reason)}`);
   throw new PublicError(502, NOT_BUILT);
@@ -307,6 +325,9 @@ async function handleNews(req, res) {
   const data = cleanPosts(input);
   if (!data.ok) throw new PublicError(400, data.error);
   if (inFlight >= MAX_IN_FLIGHT) throw new PublicError(429, '番組の準備が混み合っています。少し待ってから、もう一度お試しください。');
+  // キーの未設定は、回数の枠を数える前に断る。数えたあとに断ると、キーが無いまま送り続けただけで上限に届き、
+  // 本当の原因（キーの未設定）が分からない 429 に変わってしまうため
+  const apiKey = requireApiKey();
   // 同時数の確認のあとに数える。混雑で断った分は、回数に入れない
   if (!takeRateSlot()) throw new PublicError(429, RATE_LIMITED);
   // 画面側が途中でやめた（接続が切れた）ら、Claude への問い合わせも止める
@@ -316,7 +337,7 @@ async function handleNews(req, res) {
   });
   inFlight++;
   try {
-    sendJson(res, 200, await askClaude(data, abort.signal));
+    sendJson(res, 200, await askClaude(apiKey, data, abort.signal));
   } finally {
     inFlight--;
   }
