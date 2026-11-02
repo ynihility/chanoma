@@ -59,7 +59,7 @@ const fake = http.createServer((req, res) => {
 function startApp(env) {
   return spawn('node', ['server.mjs'], {
     cwd: ROOT,
-    env: { ...process.env, PORT: String(APP_PORT), ANTHROPIC_BASE_URL: `http://127.0.0.1:${FAKE_PORT}`, ...env },
+    env: { ...process.env, PORT: String(APP_PORT), CHANOMA_API_BASE: `http://127.0.0.1:${FAKE_PORT}`, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
@@ -205,6 +205,27 @@ for (const p of ['/fonts/', '/fonts/other.ttf', '/fonts/../server.mjs', '/fonts/
   check(`配らない: ${p} -> 404`, r.status === 404, String(r.status));
 }
 
+// --- 送り先の取り違えを防ぐ ---
+// Claude Code などが設定する ANTHROPIC_BASE_URL があっても、サーバーは本物の API を送り先にする。
+// 起動時の表示で確かめる（リクエストは送らないので、本物のネットワークには出ない）
+async function startupBanner(env) {
+  const child = spawn('node', ['server.mjs'], {
+    cwd: ROOT,
+    env: { ...process.env, PORT: '9873', ANTHROPIC_API_KEY: FAKE_KEY, CHANOMA_API_BASE: '', ANTHROPIC_BASE_URL: '', ...env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let out = '';
+  child.stdout.on('data', (d) => (out += d));
+  await wait(1200);
+  child.kill();
+  await wait(200);
+  return out;
+}
+const ambient = await startupBanner({ ANTHROPIC_BASE_URL: 'http://127.0.0.1:9' });
+check('ANTHROPIC_BASE_URL だけがあっても、送り先は本物の API と表示される', ambient.includes('送り先: 本物の Anthropic API') && !ambient.includes('127.0.0.1:9）'), ambient);
+const testBase = await startupBanner({ CHANOMA_API_BASE: 'http://127.0.0.1:9' });
+check('CHANOMA_API_BASE を指定すると、テスト用の接続先だと表示される', testBase.includes('テスト用の接続先') && testBase.includes('本物の API ではありません'), testBase);
+
 // --- ログに APIキーが出ていない ---
 check('ログに APIキーの値が出ていない', !appLog.includes(FAKE_KEY));
 app.kill();
@@ -215,7 +236,7 @@ const noKeyEnv = { ...process.env };
 delete noKeyEnv.ANTHROPIC_API_KEY;
 app = spawn('node', ['server.mjs'], {
   cwd: ROOT,
-  env: { ...noKeyEnv, PORT: String(APP_PORT), ANTHROPIC_BASE_URL: `http://127.0.0.1:${FAKE_PORT}` },
+  env: { ...noKeyEnv, PORT: String(APP_PORT), CHANOMA_API_BASE: `http://127.0.0.1:${FAKE_PORT}` },
   stdio: 'ignore',
 });
 await wait(800);

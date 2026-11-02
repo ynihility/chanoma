@@ -11,8 +11,10 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 // 1台での実演が前提なので、ほかのパソコンからは届かないように 127.0.0.1 だけで待ち受ける
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.PORT) || 8787;
-// テストでは偽の API サーバーに向けられるように、送り先を環境変数で差し替えられるようにしている
-const API_BASE = process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com';
+// テストでは偽の API サーバーに向けられるように、送り先を環境変数で差し替えられるようにしている。
+// Claude Code などが設定する ANTHROPIC_BASE_URL は、あえて読まない（本物の API に送るつもりが、別の接続先に
+// 向いてしまうのを防ぐため）。テスト専用の名前 CHANOMA_API_BASE を指定したときだけ、差し替わる
+const API_BASE = process.env.CHANOMA_API_BASE || 'https://api.anthropic.com';
 const MODEL = 'claude-opus-5-5';
 const SYSTEM_PROMPT = await readFile(path.join(ROOT, 'prompt.txt'), 'utf8');
 
@@ -286,4 +288,7 @@ server.requestTimeout = 30_000;
 
 server.listen(PORT, HOST, () => {
   console.log(`ちゃのま: http://${HOST}:${PORT}/ で待ち受けています`);
+  // どこに送るかを、起動のたびに見えるようにする（撮影の前に、本物の API だと確かめられる）
+  const isReal = API_BASE === 'https://api.anthropic.com';
+  console.log(isReal ? '送り先: 本物の Anthropic API' : `送り先: テスト用の接続先（${API_BASE}）。本物の API ではありません`);
 });
