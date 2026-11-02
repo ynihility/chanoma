@@ -68,6 +68,12 @@ const profile = () => (profiles[role] ??= { animal: '', nick: '' });
 let show = { steps: [], index: 0 };
 // いま動いている画面の演出（なければ null）
 let run = null;
+// 番組ができるのを待っている最中か
+let waiting = false;
+// 届いたけれど、まだテレビで見ていない番組（待っているあいだに「投稿にもどる」を押したときなど）。なければ null
+let ready = null;
+// 待ちが長いときに、待ち画面の一言を替えるためのタイマー
+let waitTimer = 0;
 
 function say(message) {
   $('msg').textContent = message;
@@ -257,6 +263,8 @@ function renderPosts() {
     li.append(body, del);
     list.append(li);
   }
+  // 投稿が変わったので、できていた番組が使えるかどうかを、ボタンに反映する
+  syncEvening();
 }
 
 // 動きを減らす設定か（そのときは、飾りの動きを出さない）
@@ -347,6 +355,7 @@ function changeDate() {
   const { nextDate, ...rest } = state;
   state = r.value ? { ...rest, nextDate: r.value } : rest;
   say(save() ? '' : 'この端末には保存できませんでした。画面を閉じると消えます。');
+  syncEvening();
 }
 
 // ---- 放送画面 ----
@@ -462,19 +471,25 @@ function updateNext() {
 // コーナーの区別。はじめ・おわりも、ひとつのまとまりとして数える
 const cornerKey = (step) => (step.kind === 'segment' ? step.corner : step.kind);
 
-// 場面を切り替える。コーナーが変わるときは、画面にモザイクの演出をはさむ。
-// 演出が使えない（読み込めない・動きを減らす設定）ときは、すぐ入れ替える
-function goStep(from) {
-  updateNext();
-  if (!fx || cornerKey(from) === cornerKey(show.steps[show.index])) {
-    renderStep();
+// 画面に演出をはさんで、中身を入れ替える（paint が入れ替えの処理）。演出が使えない
+// （読み込めない・動きを減らす設定）ときは、すぐ入れ替える
+function wipeTo(kind, paint) {
+  if (!fx) {
+    paint();
     return;
   }
-  const mine = fx.playWipe($('screen'), 'mosaic', renderStep);
+  const mine = fx.playWipe($('screen'), kind, paint);
   run = mine;
   mine.done.then(() => {
     if (run === mine) run = null;
   });
+}
+
+// 場面を切り替える。コーナーが変わるときは、画面にモザイクの演出をはさむ
+function goStep(from) {
+  updateNext();
+  if (cornerKey(from) === cornerKey(show.steps[show.index])) renderStep();
+  else wipeTo('mosaic', renderStep);
 }
 
 function showError(message) {
@@ -482,8 +497,79 @@ function showError(message) {
   setView(true);
   show = { steps: [{ kind: 'closing', host: message }], index: 0 };
   // アプリ自身のお知らせなので、AI の吹き出し（host）にはしない
-  setScreen(el('p', '番組を作れませんでした', 'corner'), el('p', message, 'notice'));
+  const wrap = el('div', undefined, 'fade');
+  wrap.append(el('p', '番組を作れませんでした', 'corner'), el('p', message, 'notice'));
+  setScreen(wrap);
   $('next').hidden = true;
+}
+
+// 番組を待つあいだの画面（試験放送の色の帯と、テレ吉の札）。待ちが長いときは、一言を替える
+const WAIT_NOTE = 'できるまで、少しお待ちください。';
+const WAIT_NOTE_LONG = 'すこし時間がかかっています。もうしばらく、お待ちください。';
+function showWaiting() {
+  show = { steps: [], index: 0 };
+  $('next').hidden = true;
+  setView(true);
+  play('tvon');
+  const bars = el('div', undefined, 'bars');
+  bars.setAttribute('aria-hidden', 'true');
+  for (let i = 0; i < 14; i++) bars.append(el('span'));
+  const spinner = el('span', undefined, 'spinner');
+  spinner.setAttribute('aria-hidden', 'true');
+  const card = el('div', undefined, 'wait-card');
+  card.append(spriteCanvas('テレ吉', 4, undefined, { shadow: true }), el('p', 'テレ吉が じゅんびしています', 'wait-title'), spinner, el('p', WAIT_NOTE, 'wait-note'));
+  setScreen(bars, card);
+  clearTimeout(waitTimer);
+  waitTimer = setTimeout(() => {
+    const note = document.querySelector('#screen .wait-note');
+    if (note) note.textContent = WAIT_NOTE_LONG;
+  }, 10_000);
+}
+
+// できていた番組が、いまの投稿から作ったものか（投稿やつぎに会う日が変わっていたら、使えない）
+const isReady = () => ready !== null && ready.sent === state.posts && ready.sentDate === state.nextDate;
+const READY_MESSAGE = '番組ができました。「番組をみる」を押すと、テレビで見られます。';
+
+// 「夜7時にする」のボタンの文字と、押せるかどうかを、いまの状態に合わせる
+function syncEvening() {
+  const button = $('evening');
+  if (waiting) {
+    button.disabled = true;
+    button.textContent = 'テレ吉が準備中…';
+    return;
+  }
+  // 投稿が変わったら、できていた番組は使わない
+  if (ready && !isReady()) ready = null;
+  button.disabled = false;
+  button.textContent = ready ? '番組をみる' : '夜7時にする';
+  if (!ready && $('msg').textContent === READY_MESSAGE) $('msg').textContent = '';
+}
+
+// 届いた番組をテレビで見せる。待ち画面を見ていたなら、そのままモザイクで番組に切り替える
+function watch(r, fromWaiting) {
+  ready = null;
+  show = { steps: r.steps, index: 0 };
+  $('next').hidden = false;
+  updateNext();
+  if (fromWaiting) {
+    play('next');
+    wipeTo('mosaic', renderStep);
+  } else {
+    setView(true);
+    play('tvon');
+    renderStep();
+  }
+  syncEvening();
+}
+
+// うまく作れなかったとき。テレビを見ていればテレビに、投稿に戻っていれば投稿の画面に知らせる
+function fail(message) {
+  if ($('tv-view').hidden) {
+    play('error');
+    say(message);
+  } else {
+    showError(message);
+  }
 }
 
 async function goEvening() {
@@ -492,9 +578,15 @@ async function goEvening() {
     say('投稿が1件以上あると、番組を作れます。');
     return;
   }
-  const button = $('evening');
-  button.disabled = true;
-  button.textContent = 'テレ吉が準備中…';
+  // 番組ができていて、投稿も変わっていなければ、作り直さずにそのまま見せる
+  if (isReady()) {
+    watch(ready, false);
+    return;
+  }
+  ready = null;
+  waiting = true;
+  syncEvening();
+  showWaiting();
   // 送った時点の投稿。待っているあいだに投稿が増減しても、番組の検査と表示はこの一覧で行う
   const sent = state.posts;
   const sentDate = state.nextDate;
@@ -509,25 +601,32 @@ async function goEvening() {
     });
     const data = await res.json().catch(() => null);
     if (!res.ok) {
-      showError(typeof data?.error === 'string' ? data.error : '番組を作れませんでした。もう一度お試しください。');
+      fail(typeof data?.error === 'string' ? data.error : '番組を作れませんでした。もう一度お試しください。');
       return;
     }
     // サーバーでも検査しているが、画面でも同じ検査を通してから使う
     const checked = checkNews(data, sent);
     if (!checked.ok) {
-      showError('番組をうまく組み立てられませんでした。もう一度お試しください。');
+      fail('番組をうまく組み立てられませんでした。もう一度お試しください。');
       return;
     }
-    show = { steps: buildSteps(checked.news, sent, sentDate), index: 0 };
-    $('next').hidden = false;
-    setView(true);
-    play('tvon');
-    renderStep();
+    const made = { steps: buildSteps(checked.news, sent, sentDate), sent, sentDate };
+    waiting = false;
+    if (!$('tv-view').hidden) {
+      // 待ち画面を見ているので、そのまま番組に切り替える
+      watch(made, true);
+    } else if (made.sent === state.posts && made.sentDate === state.nextDate) {
+      // 待っているあいだに「投稿にもどる」を押していたら、勝手にテレビへは戻さない。できたことだけ知らせる
+      ready = made;
+      play('next');
+      $('msg').textContent = READY_MESSAGE;
+    }
   } catch {
-    showError('通信できませんでした。つながっているか確かめて、もう一度お試しください。');
+    fail('通信できませんでした。つながっているか確かめて、もう一度お試しください。');
   } finally {
-    button.disabled = false;
-    button.textContent = '夜7時にする';
+    waiting = false;
+    clearTimeout(waitTimer);
+    syncEvening();
   }
 }
 

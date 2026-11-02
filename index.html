@@ -553,6 +553,9 @@
     /* 画面: 角の丸いブラウン管。ふちは濃く、中央は少し明るい */
     .screen {
       position: relative;
+      /* 中身を1列に並べる。番組を待つあいだの札を、画面の真ん中に置けるようにするため */
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
       min-height: 360px;
       padding: var(--gap-6) 40px;
       color: var(--crt-light);
@@ -616,6 +619,8 @@
       border-radius: 20px;
       box-shadow: 5px 5px 0 var(--ink);
       overflow-wrap: anywhere;
+      /* 対応しているブラウザでは、文節のところで改行する（「ひと / こと」のように割れにくくなる） */
+      word-break: auto-phrase;
     }
     /* 吹き出しのしっぽ（テレ吉のほうを向く）。外側の三角が枠の色、内側の三角が地の色 */
     .screen .host::before, .screen .host::after {
@@ -655,6 +660,7 @@
       border: 3px solid var(--ink);
       border-radius: 4px;
       box-shadow: inset 0 18px 0 var(--shu), 5px 5px 0 var(--ink);
+      word-break: auto-phrase;
     }
     .screen .post::before {
       content: "";
@@ -674,6 +680,77 @@
     .screen .post .text { font-size: 32px; line-height: 1.6; margin: var(--gap-2) 0 0; overflow-wrap: anywhere; }
     .screen .fade { position: relative; z-index: 1; animation: fade-in 350ms ease-out; }
     @keyframes fade-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+    /* 番組を待つあいだの画面: 試験放送の色の帯を敷いて、真ん中にテレ吉の札を置く。
+       帯の色は、画面の色をブラウン管の地に沈ませたもの（まぶしくならないように） */
+    .screen .bars {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      grid-template-rows: 72% 28%;
+      overflow: hidden;
+    }
+    .screen .bars span:nth-child(1) { background: #9D9D8C; }
+    .screen .bars span:nth-child(2) { background: #9B7B1B; }
+    .screen .bars span:nth-child(3) { background: #557F70; }
+    .screen .bars span:nth-child(4) { background: #5E693C; }
+    .screen .bars span:nth-child(5) { background: #823424; }
+    .screen .bars span:nth-child(6) { background: #6E4E2E; }
+    .screen .bars span:nth-child(7) { background: #2B4A3C; }
+    /* 下の段は、暗い色を1つおきに挟む */
+    .screen .bars span:nth-child(n+8) { background: #1A3328; }
+    .screen .bars span:nth-child(9) { background: #823424; }
+    .screen .bars span:nth-child(11) { background: #557F70; }
+    .screen .bars span:nth-child(13) { background: #9D9D8C; }
+    /* ゆっくり上から下へ流れる、うすい暗い帯（走査のむら）。明るさの変わり方は小さく、5秒で1回 */
+    .screen .bars::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: -20%;
+      height: 18%;
+      background: rgba(10, 6, 4, 0.22);
+      animation: hum 5s linear infinite;
+    }
+    @keyframes hum { to { top: 100%; } }
+    .screen .wait-card {
+      position: relative;
+      z-index: 1;
+      align-self: center;
+      justify-self: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--gap-3);
+      width: 100%;
+      max-width: 420px;
+      padding: var(--gap-3) var(--gap-5);
+      text-align: center;
+      /* 対応しているブラウザでは、文節のところで改行し、行の長さをそろえる */
+      word-break: auto-phrase;
+      text-wrap: balance;
+      color: #F3FFF8;
+      background: var(--crt);
+      border: 4px solid var(--crt-light);
+      border-radius: 20px;
+      box-shadow: 5px 5px 0 var(--ink);
+      animation: fade-in 350ms ease-out;
+    }
+    .screen .wait-title { margin: 0; font-family: var(--font-head); font-size: 28px; line-height: 1.5; }
+    .screen .wait-note { margin: 0; font-size: 24px; line-height: 1.6; overflow-wrap: anywhere; }
+    /* 回る印。小さな面の中で、12こまに分けて1.2秒で1回りする（ちらつきにならない小さな動き） */
+    .screen .spinner {
+      display: block;
+      width: 44px;
+      height: 44px;
+      border: 6px solid rgba(191, 232, 208, 0.3);
+      border-top-color: var(--yamabuki);
+      border-radius: 50%;
+      animation: spin 1.2s steps(12) infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
     /* テレビの右側: つまみ2つ、放送中の小さな灯り、スピーカーの格子 */
     .tv-dials {
@@ -763,6 +840,8 @@
       .tv-dials { width: auto; flex-direction: row; justify-content: center; padding: var(--gap-2); }
       .speaker { flex: none; width: 80px; min-height: 40px; }
       .screen { min-height: 300px; padding: var(--gap-5) var(--gap-4); border-radius: 32px / 26px; }
+      .screen .wait-card { padding: var(--gap-3) var(--gap-4); }
+      .screen .wait-title { font-size: 26px; }
       .screen .post { padding-left: var(--gap-3); padding-right: var(--gap-3); }
       .screen .post .who { font-size: 24px; }
       .screen .post .card { font-size: 32px; }
