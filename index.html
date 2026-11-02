@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ちゃのま</title>
   <!-- 自分のサーバーのスクリプトだけを動かす。万一 HTML が紛れ込んでも、外へ送ったり別のスクリプトを動かしたりできない -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'">
   <style>
     /* ===== 色・文字・寸法の決まり ===== */
     :root {
@@ -49,19 +49,15 @@
       --drop: 4px 4px 0 var(--shade);
     }
 
-    /* ===== 同梱フォント版（いまは使わない） =====
-       本人の許可が出たら、このコメントを外して fonts/ に woff2 を置く。
-       あわせて CSP に font-src 'self' を足し、server.mjs の配ってよいファイルにも加える必要がある。
-    @font-face { font-family: "Reggae One"; src: url("fonts/ReggaeOne-Regular.woff2") format("woff2"); font-display: swap; }
-    @font-face { font-family: "BIZ UDPGothic"; src: url("fonts/BIZUDPGothic-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
-    @font-face { font-family: "BIZ UDPGothic"; src: url("fonts/BIZUDPGothic-Bold.woff2") format("woff2"); font-weight: 700; font-display: swap; }
-    @font-face { font-family: "DotGothic16"; src: url("fonts/DotGothic16-Regular.woff2") format("woff2"); font-display: swap; }
+    /* ===== 同梱フォント（SIL Open Font License 1.1。ライセンス全文は fonts/ にある） =====
+       見出しの看板文字は Reggae One、ドット風の文字は DotGothic16。本文は端末のフォントのまま。
+       どちらも加工せず、配布元のファイル（TTF）をそのまま配っている。 */
+    @font-face { font-family: "Reggae One"; src: url("fonts/ReggaeOne-Regular.ttf") format("truetype"); font-display: swap; }
+    @font-face { font-family: "DotGothic16"; src: url("fonts/DotGothic16-Regular.ttf") format("truetype"); font-display: swap; }
     :root {
-      --font-head: "Reggae One", "Yu Gothic UI", "Hiragino Sans", sans-serif;
-      --font-body: "BIZ UDPGothic", "Yu Gothic UI", "Hiragino Sans", sans-serif;
-      --font-dot: "DotGothic16", "MS Gothic", monospace;
+      --font-head: "Reggae One", "Yu Gothic UI", "Hiragino Sans", "Noto Sans JP", "Meiryo", sans-serif;
+      --font-dot: "DotGothic16", "MS Gothic", "Osaka-Mono", monospace;
     }
-    ===== ここまで ===== */
 
     * { box-sizing: border-box; }
     body {
@@ -498,7 +494,7 @@
       margin-right: var(--gap-2);
       padding: 0 10px;
       font-family: var(--font-dot);
-      font-size: 28px;
+      font-size: 32px;
       font-weight: 700;
       line-height: 1.4;
       color: var(--crt);

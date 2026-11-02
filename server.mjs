@@ -26,6 +26,11 @@ const STATIC_FILES = {
   '/voice.js': ['voice.js', 'text/javascript; charset=utf-8'],
   '/sprites.js': ['sprites.js', 'text/javascript; charset=utf-8'],
   '/pixel.js': ['pixel.js', 'text/javascript; charset=utf-8'],
+  // 同梱フォントと、そのライセンス全文（OFL では、フォントと一緒にライセンスを配る決まり）
+  '/fonts/ReggaeOne-Regular.ttf': ['fonts/ReggaeOne-Regular.ttf', 'font/ttf'],
+  '/fonts/DotGothic16-Regular.ttf': ['fonts/DotGothic16-Regular.ttf', 'font/ttf'],
+  '/fonts/OFL-ReggaeOne.txt': ['fonts/OFL-ReggaeOne.txt', 'text/plain; charset=utf-8'],
+  '/fonts/OFL-DotGothic16.txt': ['fonts/OFL-DotGothic16.txt', 'text/plain; charset=utf-8'],
 };
 
 // 30件 × 200文字のひとことが、日本語（1文字3バイト）で約22KBになる。それより余裕をもたせた上限
@@ -240,7 +245,8 @@ async function handleStatic(pathname, res) {
   }
   res.writeHead(200, {
     'Content-Type': entry[1],
-    'Cache-Control': 'no-store',
+    // フォントは大きい（約2MB）うえに変わらないので、1日は端末に保存させる。ほかは、直したらすぐ反映されるよう保存させない
+    'Cache-Control': entry[1].startsWith('font/') ? 'public, max-age=86400' : 'no-store',
     'X-Content-Type-Options': 'nosniff',
   });
   res.end(file);
