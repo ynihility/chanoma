@@ -5,7 +5,7 @@ import {
   DEFAULT_ROLES, cleanPosts, cleanPost, cleanDate, cleanRoles, checkNews, checkPostWords, reasonFact, loadState, serializeState,
 } from './safe.js';
 import { createRoomClient, parseInvite, hasInvite, SYNC_MS } from './room.js';
-import { play, setMuted } from './sound.js';
+import { play, setMuted, hostBlips, stopBlips } from './sound.js';
 import { voiceSupported, listen } from './voice.js';
 import { spriteCanvas } from './pixel.js';
 
@@ -605,6 +605,8 @@ function tvToTop() {
 // onAir が true ならテレビ、false なら投稿の画面（shelf が true のときは、本棚の画面）
 function setView(onAir, shelf = false) {
   cancelFx();
+  // 画面を替えるときは、前の場面のテレ吉の声を残さない
+  stopBlips();
   $('post-view').hidden = onAir || shelf;
   $('list-view').hidden = onAir || shelf;
   $('date-view').hidden = onAir || shelf;
@@ -874,6 +876,9 @@ function renderStep(still = false) {
     wrap.append(titleLine(step.kind === 'opening' ? ['夜7時の', 'かぞくニュース'] : ['おしまい']), hostLine(step.host));
   }
   setScreen(wrap);
+  // 吹き出しが出る場面だけ、テレ吉の声を鳴らす（番組表は、鳴らさずに前の声だけ止める）。文字は一括で出すので、出た時に合わせて鳴らし始める
+  if (step.kind === 'table') stopBlips();
+  else hostBlips(step.host);
   updateNext();
 }
 
