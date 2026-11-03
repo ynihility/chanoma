@@ -180,6 +180,11 @@ function pickTopic(v) {
   pick.topic = v;
   pick.card = '';
   renderForm();
+  // 選んだら、札（「いつ会いたい」なら日付）の欄が見えるように、画面を動かす。動きを減らす設定では、すぐ動かす
+  if (v) {
+    const box = $('cards-box').hidden ? $('wish-date-box') : $('cards-box');
+    box.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  }
 }
 
 function renderForm() {

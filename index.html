@@ -153,6 +153,9 @@
       line-height: 1.4;
       min-height: 56px;
       padding: var(--gap-2) var(--gap-4);
+      /* 長い名前（20字の英字など）でも、横にはみ出さず、ボタンの中で折り返す */
+      max-width: 100%;
+      overflow-wrap: anywhere;
       color: var(--ink);
       background: var(--paper);
       border: 3px solid var(--ink);
@@ -269,7 +272,7 @@
     }
     /* 黒と白の二重の枠。白・黒・白の順に重なるので、木の色、畳、紙、どの上でも見える。
        ボタンごとの影の指定より必ず勝つように !important を付ける */
-    button:focus-visible, input:focus-visible, [tabindex="-1"]:focus-visible {
+    button:focus-visible, input:focus-visible, summary:focus-visible, [tabindex="-1"]:focus-visible {
       outline: 3px solid #000 !important;
       outline-offset: 3px;
       box-shadow: 0 0 0 9px #FFFFFF !important;
@@ -302,6 +305,7 @@
       font-weight: 800;
       line-height: 1.4;
       letter-spacing: 0.05em;
+      overflow-wrap: anywhere;
     }
     /* 見出しの下の、新聞のような二重線 */
     #post-title, #list-title { padding-bottom: var(--gap-1); border-bottom: 5px double var(--ink); }
@@ -319,8 +323,9 @@
     }
     .note { font-size: 24px; color: var(--shade); margin: var(--gap-2) 0; }
     .msg { min-height: 1.7em; margin: var(--gap-3) 0 0; font-weight: 700; color: var(--shu-text); }
-    /* 注記や案内の文は、対応しているブラウザでは文節のところで改行する（「ブ／ラウザ」のように語の途中で割れにくくなる） */
-    .note, .msg, .label, summary { word-break: auto-phrase; }
+    /* 注記や案内の文は、対応しているブラウザでは文節のところで改行する（「ブ／ラウザ」のように語の途中で割れにくくなる）。
+       長い名前が入っても、横にはみ出さず折り返す */
+    .note, .msg, .label, summary { word-break: auto-phrase; overflow-wrap: anywhere; }
 
     /* 上の案内: よびかたのボタンと「夜7時にする」のすぐ下に、紙の短冊で出す。左の朱の帯で、お知らせだと分かるようにする */
     .top-live { max-width: 880px; margin: 0 auto; padding: 0 var(--gap-4); }
