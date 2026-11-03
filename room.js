@@ -79,15 +79,19 @@ export function fitShelf(items, { maxItems = SHELF_MAX_ITEMS, maxBytes = SHELF_M
 }
 
 // 本棚の1本を検査して、決まった項目だけの新しい値にする。端末の保存からも、他人の端末から戻ったものからも、同じ検査を通す。
+// room は、その番組を置いた部屋のコード。コードがない（古い保存データなど）ものは「部屋なし」として残し、見せず、交換にも使わない。
 // 通らなければ null
 export function normalizeShelfItem(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !isDateKey(raw.date)) return null;
   const checked = checkShelfProgram({ news: raw.news, posts: raw.posts, nextDate: raw.nextDate, madeAt: raw.madeAt });
   if (!checked.ok) return null;
   const { news, posts, nextDate, madeAt } = checked.program;
-  return { date: raw.date, news, posts, ...(nextDate ? { nextDate } : {}), madeAt, ...(raw.restored === true ? { restored: true } : {}) };
+  return {
+    date: raw.date, news, posts, ...(nextDate ? { nextDate } : {}), madeAt,
+    ...(isRoomCode(raw.room) ? { room: raw.room } : {}), ...(raw.restored === true ? { restored: true } : {}),
+  };
 }
-// サーバーに差し出す形。端末だけで使う項目（date・restored）は入れない（検査が、入力全体の大きさを数えるため）
+// サーバーに差し出す形。端末だけで使う項目（date・room・restored）は入れない（検査が、入力全体の大きさを数えるため）
 export const programForOffer = (item) => ({
   news: item.news, posts: item.posts, madeAt: item.madeAt, ...(item.nextDate ? { nextDate: item.nextDate } : {}),
 });
@@ -275,23 +279,26 @@ export function createRoomClient(env = {}) {
   }
 
   // ---- 本棚 ----
+  // 本棚は、端末全体で1つ（60本・2MBの上限も端末全体で数える）。番組には部屋のコードが付く。
+  // 画面に出すのも、サーバーとやりとりするのも、いまの部屋のコードと同じものだけ。別の部屋の番組と、部屋なしの番組は、端末に残すだけ
   let shelfItems = null;
-  const shelf = () => {
+  const allShelf = () => {
     shelfItems ??= loadShelf(read(SHELF_KEY));
     return shelfItems;
   };
+  const shelf = () => (rec ? allShelf().filter((i) => i.room === rec.code) : []);
   function saveShelf() {
     write(SHELF_KEY, JSON.stringify({ v: 1, items: shelfItems }));
   }
-  // 同じ日付があれば置き換える。上限を超えた古いものは捨てる
+  // 同じ部屋の同じ日付があれば置き換える（別の部屋の同じ日付は、そのまま残す）。上限を超えた古いものは捨てる
   function addToShelf(item) {
-    shelfItems = fitShelf([...shelf().filter((i) => i.date !== item.date), item]);
+    shelfItems = fitShelf([...allShelf().filter((i) => !(i.date === item.date && i.room === item.room)), item]);
     saveShelf();
   }
-  // きょうの番組を、本棚に置く（同じ番組がすでにあれば何もしない）
+  // きょうの番組を、いまの部屋の本棚に置く（同じ番組がすでにあれば何もしない）
   function shelveToday(program) {
-    if (shelf().some((i) => i.date === program.date && i.madeAt === program.madeAt)) return;
-    const item = normalizeShelfItem(program);
+    if (!rec || shelf().some((i) => i.date === program.date && i.madeAt === program.madeAt)) return;
+    const item = normalizeShelfItem({ ...program, room: rec.code });
     if (item) addToShelf(item);
   }
 
@@ -523,7 +530,8 @@ export function createRoomClient(env = {}) {
         const r = await call('GET', `/api/room/${rec.code}/shelf?dates=${dates.join(',')}`);
         if (r.status !== 200 || !Array.isArray(r.data?.programs)) break;
         for (const p of r.data.programs) {
-          const item = p && dates.includes(p.date) ? normalizeShelfItem({ ...p, restored: p.source === 'device' }) : null;
+          // 部屋のコードは、受け取った中身ではなく、いま入っている部屋のものを付ける
+          const item = p && dates.includes(p.date) ? normalizeShelfItem({ ...p, room: rec.code, restored: p.source === 'device' }) : null;
           if (item) {
             addToShelf(item);
             result.received++;

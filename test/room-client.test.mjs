@@ -155,8 +155,13 @@ test('本棚の上限: 同じ日付は、あとに作った番組を先に並べ
 
 test('本棚の1本: 検査を通り、決まった項目だけの新しい値になる', () => {
   const item = normalizeShelfItem({ ...shelfItem(YESTERDAY, 123, { restored: true }), room: CODE, extra: '<b>', device: 'x' });
-  assert.deepEqual(Object.keys(item).sort(), ['date', 'madeAt', 'news', 'posts', 'restored']);
+  assert.deepEqual(Object.keys(item).sort(), ['date', 'madeAt', 'news', 'posts', 'restored', 'room']);
+  assert.equal(item.room, CODE);
   assert.equal(item.restored, true);
+  // 部屋のコードの形が正しくなければ、「部屋なし」にする（項目ごと落とす）
+  assert.equal('room' in normalizeShelfItem({ ...shelfItem(YESTERDAY), room: 'short' }), false);
+  assert.equal('room' in normalizeShelfItem({ ...shelfItem(YESTERDAY), room: { x: 1 } }), false);
+  assert.equal('room' in normalizeShelfItem(shelfItem(YESTERDAY)), false);
   assert.equal(normalizeShelfItem(shelfItem(YESTERDAY, 123, { restored: 'yes' })).restored, undefined);
   assert.equal(normalizeShelfItem(shelfItem(YESTERDAY, 123, { nextDate: '2026-12-01' })).nextDate, '2026-12-01');
 });
@@ -288,7 +293,8 @@ test('部屋を出る: コードを忘れる。本棚と端末の鍵と、保存
   const { client, storage } = newClient(server);
   await client.enter(CODE);
   await client.post(goodPost('a1'));
-  storage.setItem(SHELF_KEY, JSON.stringify({ v: 1, items: [shelfItem(YESTERDAY)] }));
+  storage.setItem(SHELF_KEY, JSON.stringify({ v: 1, items: [shelfItem(YESTERDAY, 1, { room: CODE })] }));
+  assert.equal(client.shelf().length, 1);
   storage.setItem('chanoma.v1', '{"v":1,"posts":[]}');
   const deviceBefore = storage.getItem(DEVICE_KEY);
   assert.match(deviceBefore, /^[0-9a-f]{64}$/);
@@ -299,6 +305,10 @@ test('部屋を出る: コードを忘れる。本棚と端末の鍵と、保存
   assert.equal(storage.getItem(DEVICE_KEY), deviceBefore);
   assert.ok(storage.getItem(SHELF_KEY));
   assert.equal(storage.getItem('chanoma.v1'), '{"v":1,"posts":[]}');
+  // 部屋を出ると、本棚の画面は空になる。番組そのものは、端末に残る
+  assert.equal(client.shelf().length, 0);
+  assert.equal(JSON.parse(storage.getItem(SHELF_KEY)).items.length, 1);
+  await client.enter(CODE);
   assert.equal(client.shelf().length, 1);
 });
 
@@ -646,7 +656,8 @@ test('本棚の持ち寄り: サーバーにない日付を差し出す。差し
   const { client, storage } = newClient(server);
   storage.setItem(SHELF_KEY, JSON.stringify({
     v: 1,
-    items: [shelfItem('2026-11-03', 3), shelfItem('2026-11-02', 2, { restored: true, nextDate: '2026-12-01' }), shelfItem(YESTERDAY, 4), shelfItem(TODAY, 5), shelfItem(shiftDate(TODAY, -61), 1)],
+    items: [shelfItem('2026-11-03', 3, { room: CODE }), shelfItem('2026-11-02', 2, { room: CODE, restored: true, nextDate: '2026-12-01' }), shelfItem(YESTERDAY, 4, { room: CODE }),
+      shelfItem(TODAY, 5, { room: CODE }), shelfItem(shiftDate(TODAY, -61), 1, { room: CODE })],
   }));
   await client.enter(CODE);
   await client.sync();
@@ -707,7 +718,7 @@ test('本棚の持ち寄り: 部屋の本棚がいっぱい（409）なら、差
   const offers = [];
   const full = serverShelf({ offers, full: true });
   const a = newClient(full);
-  a.storage.setItem(SHELF_KEY, JSON.stringify({ v: 1, items: [shelfItem('2026-11-01'), shelfItem('2026-11-02'), shelfItem('2026-11-03')] }));
+  a.storage.setItem(SHELF_KEY, JSON.stringify({ v: 1, items: [shelfItem('2026-11-01', 1, { room: CODE }), shelfItem('2026-11-02', 1, { room: CODE }), shelfItem('2026-11-03', 1, { room: CODE })] }));
   await a.client.enter(CODE);
   await a.client.sync();
   assert.equal((await a.client.exchange()).offered, 0);
@@ -727,11 +738,88 @@ test('本棚の持ち寄り: 部屋の本棚がいっぱい（409）なら、差
     return okSync();
   });
   const b = newClient(racing);
-  b.storage.setItem(SHELF_KEY, JSON.stringify({ v: 1, items: [shelfItem('2026-11-01'), shelfItem('2026-11-02')] }));
+  b.storage.setItem(SHELF_KEY, JSON.stringify({ v: 1, items: [shelfItem('2026-11-01', 1, { room: CODE }), shelfItem('2026-11-02', 1, { room: CODE })] }));
   await b.client.enter(CODE);
   await b.client.sync();
   assert.equal((await b.client.exchange()).offered, 1);
   assert.deepEqual(offers2, ['2026-11-01', '2026-11-02']);
+});
+
+// 本棚は端末全体で1つ。番組には部屋のコードが付き、画面に出すのも、サーバーとやりとりするのも、いまの部屋のものだけ
+test('本棚と部屋: 2つの部屋のコードを持つ端末は、入った部屋の番組だけを差し出し、画面にも出す', async () => {
+  const offers = [];
+  const server = serverShelf({ offers });
+  const { client, storage } = newClient(server);
+  storage.setItem(SHELF_KEY, JSON.stringify({
+    v: 1,
+    items: [shelfItem('2026-11-01', 1, { room: CODE }), shelfItem('2026-11-02', 2, { room: OTHER }), shelfItem('2026-11-03', 3, { room: OTHER }), shelfItem(YESTERDAY, 4)],
+  }));
+  await client.enter(CODE);
+  await client.sync();
+  assert.deepEqual(client.shelf().map((i) => i.date), ['2026-11-01']);
+  const r = await client.exchange();
+  assert.equal(r.offered, 1);
+  assert.deepEqual(offers.map((o) => o.date), ['2026-11-01']);
+  // もう片方の部屋へ移ると、そちらの番組だけを差し出す（さっきの部屋の番組は出さない）
+  const offers2 = [];
+  const other = serverShelf({ offers: offers2 });
+  const o = newClient(other, { storage });
+  await o.client.enter(OTHER);
+  await o.client.sync();
+  assert.deepEqual(o.client.shelf().map((i) => i.date).sort(), ['2026-11-02', '2026-11-03']);
+  await o.client.exchange();
+  assert.deepEqual(offers2.map((x) => x.date), ['2026-11-02', '2026-11-03']);
+  // 部屋なしの番組（コードのない古い保存）は、どちらの部屋にも出さず、交換にも使わず、端末に残る
+  assert.equal(JSON.parse(storage.getItem(SHELF_KEY)).items.filter((i) => !i.room).length, 1);
+});
+
+test('本棚と部屋: 古い保存データ（コードなし）は捨てずに「部屋なし」で残り、新しい番組を置いても消えない', async () => {
+  const server = fakeServer(({ method, path }) => {
+    if (method === 'POST' && path.endsWith('/news')) return { status: 200, body: { made: true, program: roomProgram(9) } };
+    return okSync();
+  });
+  const { client, storage } = newClient(server);
+  storage.setItem(SHELF_KEY, JSON.stringify({ v: 1, items: [shelfItem(YESTERDAY, 4)] }));
+  await client.enter(CODE);
+  await client.sync();
+  assert.equal(client.shelf().length, 0);
+  assert.equal((await client.makeNews()).ok, true);
+  assert.deepEqual(client.shelf().map((i) => i.date), [TODAY]);
+  const saved = JSON.parse(storage.getItem(SHELF_KEY)).items;
+  assert.equal(saved.length, 2);
+  assert.equal(saved.find((i) => i.date === TODAY).room, CODE);
+  assert.equal('room' in saved.find((i) => i.date === YESTERDAY), false);
+});
+
+test('本棚と部屋: 同じ日付でも部屋が違えば別の1本。同じ部屋の同じ日付だけが置き換わる。上限は端末全体で数える', async () => {
+  const { storage } = newClient(serverShelf());
+  const have = { '2026-11-02': { date: '2026-11-02', news: SAMPLE_NEWS, posts: SAMPLE_POSTS, madeAt: 7, source: 'server' } };
+  const server = serverShelf({ have });
+  storage.setItem(SHELF_KEY, JSON.stringify({ v: 1, items: [shelfItem('2026-11-02', 1, { room: OTHER })] }));
+  const c = newClient(server, { storage }).client;
+  await c.enter(CODE);
+  await c.sync();
+  await c.exchange();
+  // 受け取った番組には、いまの部屋のコードが付く。別の部屋の同じ日付は残る
+  assert.deepEqual(c.shelf().map((i) => [i.date, i.madeAt]), [['2026-11-02', 7]]);
+  const saved = JSON.parse(storage.getItem(SHELF_KEY)).items;
+  assert.deepEqual(saved.map((i) => [i.room, i.madeAt]).sort(), [[CODE, 7], [OTHER, 1]]);
+  // 上限（60本）は部屋をまたいで数える。古い日付から落ちる
+  const many = Array.from({ length: 70 }, (_, i) => shelfItem(day(i), 1, { room: i % 2 ? CODE : OTHER }));
+  const loaded = loadShelf(JSON.stringify({ v: 1, items: many }));
+  assert.equal(loaded.length, 60);
+  assert.equal(loaded.filter((i) => i.room === CODE).length + loaded.filter((i) => i.room === OTHER).length, 60);
+  assert.equal(loaded[0].date, day(69));
+});
+
+test('本棚と部屋: サーバーから受け取った番組が別のコードを名乗っていても、いまの部屋のコードで置く', async () => {
+  const stray = { date: '2026-11-01', news: SAMPLE_NEWS, posts: SAMPLE_POSTS, madeAt: 1, source: 'server', room: OTHER };
+  const server = fakeServer(({ path }) => (path.includes('/shelf?dates=') ? { status: 200, body: { programs: [stray] } } : okSync({ dates: ['2026-11-01'] })));
+  const { client, storage } = newClient(server);
+  await client.enter(CODE);
+  await client.sync();
+  assert.equal((await client.exchange()).received, 1);
+  assert.equal(JSON.parse(storage.getItem(SHELF_KEY)).items[0].room, CODE);
 });
 
 test('本棚の持ち寄り: 部屋に入っていないとき、まだ同期していないとき、見つからないときは何も送らない', async () => {
