@@ -599,9 +599,23 @@ function buildSteps(news, posts, nextDate) {
   ];
 }
 
-// 「AI」の札。見本の番組では「AI（見本）」にして、いまの AI が書いた本物の言葉と取り違えないようにする
-function aiChip() {
-  return el('span', show.sample ? 'AI（見本）' : 'AI', show.sample ? 'ai-chip sample-chip' : 'ai-chip');
+// 司会「テレ吉」の札。つなぎの言葉と、番組表の特集名・わけに付けて、家族の言葉と見分けられるようにする。
+// 見た目の文字は「テレ吉」。読み上げでは「AI が考えた言葉」だと伝える（AI の表示は、テレビの下の注記にも常に出している）。
+// 見本の番組では「テレ吉（見本）」にして、いまの AI が考えた本物の言葉と取り違えないようにする。
+// class 名の ai-chip は、はじめ「AI」の札だった名残（effects.js も同じ名前で読むので、変えない）
+function hostChip() {
+  const chip = el('span', undefined, show.sample ? 'ai-chip sample-chip' : 'ai-chip');
+  // 絵として読み上げさせて、見た目の文字のかわりに、読み上げ用の文を伝える
+  chip.setAttribute('role', 'img');
+  if (show.sample) {
+    chip.setAttribute('aria-label', 'テレ吉（AI が考えた見本の言葉）');
+    // 札が行より長い狭い画面では、「テレ吉」と「（見本）」の切れ目で折れる。「（見本）」は小さめにして、札を細くする
+    chip.append(nw('テレ吉'), el('span', '（見本）', 'nw tail'));
+  } else {
+    chip.setAttribute('aria-label', 'テレ吉（AI が考えた言葉）');
+    chip.append('テレ吉');
+  }
+  return chip;
 }
 
 // 見本の番組のすべての場面の、いちばん上に出す帯。画面の中に置くので、テレビだけを切り取って録画しても残る
@@ -619,14 +633,14 @@ function syncSlip() {
 }
 
 // 今夜の番組表の中身（特集名と、コーナーごとのわけ・出る人）。文字はすべて textContent で入れる。
-// 特集名とわけは AI が選んだものなので、札を付ける。コーナー名・出る人・補足は、コードが投稿から作ったものなので、札は付けない
+// 特集名とわけは AI が考えたものなので、「テレ吉」の札を付ける。コーナー名・出る人・補足は、コードが投稿から作ったものなので、札は付けない
 function lineupNodes(step) {
   const nodes = [];
   if (step.feature) {
-    // 札と特集名を1つの枠にまとめて、AI が選んだのは特集名だと分かるようにする
+    // 札と特集名を1つの枠にまとめて、テレ吉（AI）が選んだのは特集名だと分かるようにする
     const box = el('div', undefined, 'feature');
     const label = el('p', undefined, 'feature-label');
-    label.append(aiChip(), nw('今夜の特集'));
+    label.append(hostChip(), nw('今夜の特集'));
     const name = el('p', undefined, 'feature-name');
     name.append(nw(step.feature));
     box.append(label, name);
@@ -646,7 +660,7 @@ function lineupNodes(step) {
     if (c.reason) {
       const why = el('p', undefined, 'lineup-why');
       // わけの文は1つの箱に入れる。札と同じ行に入りきらないときは、文ごと次の行へ移る（文節の途中で折れない）
-      why.append(aiChip(), nw(c.reason));
+      why.append(hostChip(), nw(c.reason));
       item.append(why);
     }
     if (c.fact) {
@@ -688,12 +702,12 @@ function lineupNodes(step) {
   return nodes;
 }
 
-// 司会のつなぎの言葉。テレ吉（飾り）の横に吹き出しを出し、中に「AI」の札を入れる（家族の短冊と見分けるため）
+// 司会のつなぎの言葉。テレ吉（飾り）の横に吹き出しを出し、中に「テレ吉」の札を入れる（家族の短冊と見分けるため）
 function hostLine(text) {
   const row = el('div', undefined, 'host-row');
   const bubble = el('p', undefined, 'host');
   // 文字は元のまま。よびかたなどの語だけ、途中で折れない箱に入れる
-  bubble.append(aiChip(), ...guard(text));
+  bubble.append(hostChip(), ...guard(text));
   row.append(spriteCanvas('テレ吉', 4, undefined, { shadow: true }), bubble);
   return row;
 }
