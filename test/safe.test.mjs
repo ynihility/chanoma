@@ -432,3 +432,44 @@ test('cleanRoles: 全く同じ名前が重なったときは、同じ言葉を�
   assert.equal(r.ok, false);
   assert.match(r.error, /ほかの人がもう使っています/);
 });
+
+// ---- よびかたを変えた人（「うちのおばあちゃん」など）を、司会が名前のまま呼ぶ ----
+// 投稿にある名前そのものは通す。投稿にいない人を足したときは、今までどおり弾く
+// whos の人たちの投稿を、hosts の文でそれぞれ呼ぶ番組を検査する
+const callAs = (whos, hosts) => {
+  const ps = whos.map((who, i) => ({ id: `p${i}`, who, topic: 'そら' }));
+  const segments = ps.map((p, i) => ({ corner: 'ひとこと', from: p.id, host: hosts[i] }));
+  return checkNews({ opening: 'こんばんは。', segments, closing: 'おやすみなさい。' }, ps);
+};
+for (const [who, host] of [
+  ['うちのおばあちゃん', 'うちのおばあちゃんのひとことです。'],
+  ['東京のおじいちゃん', '東京のおじいちゃんのお話です。'],
+]) {
+  test(`通す(よびかた変更): 「${who}」を「${host}」と呼ぶ`, () => {
+    const r = callAs([who], [host]);
+    assert.equal(r.ok, true, r.reason);
+  });
+}
+for (const [who, host] of [
+  ['うちのおばあちゃん', 'おじいちゃんのお話です。'],
+  ['うちのおばあちゃん', 'おばあちゃんとおじいちゃんのお話です。'],
+]) {
+  test(`弾く(よびかた変更): 「${who}」だけの投稿に「${host}」`, () => {
+    assert.equal(callAs([who], [host]).ok, false, `通ってしまった: ${host}`);
+  });
+}
+test('弾く(よびかた変更): 名前をそのまま呼んだあとに、投稿にいない「おじいちゃん」を足したら、その理由で弾く', () => {
+  const r = callAs(['うちのおばあちゃん'], ['うちのおばあちゃんとおじいちゃんのお話です。']);
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /おじいちゃん/);
+});
+test('弾く(よびかた変更): 投稿の名前を一部に含む、もっと長いよびかた（ひいおばあちゃん・ひいばあば）は、投稿にいなければ弾く', () => {
+  for (const [who, host] of [['おばあちゃん', 'ひいおばあちゃんのお話です。'], ['ばあば', 'ひいばあばのお話です。']]) {
+    assert.equal(callAs([who], [host]).ok, false, `通ってしまった: ${who} の投稿に ${host}`);
+  }
+});
+test('通す(よびかた変更): 名前が別の名前を含んでいても、長い名前をそのまま呼べる', () => {
+  // 短い「おばあちゃん」を先に消すと、「東京のおじいちゃんと」が残り、「おじいちゃん」を投稿にないよびかたと見誤る
+  const r = callAs(['おばあちゃん', '東京のおじいちゃんとおばあちゃん'], ['おばあちゃんのお話です。', '東京のおじいちゃんとおばあちゃんのお話です。']);
+  assert.equal(r.ok, true, r.reason);
+});

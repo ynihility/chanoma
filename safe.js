@@ -321,10 +321,17 @@ function wordProblem(s, ctx) {
   if (DATE_PATTERN_WORDS.test(g)) return '日付や曜日を言っている';
 
   // 家族のよびかたは、投稿の「よびかた・ニックネーム」に出ているものだけ許す（本文に出てくるだけでは許さない）
+  // 「うちのおばあちゃん」のような投稿の名前そのものは、よびかたの照合の前に、文から取り除く。
+  // 取り除くのは長い名前から：短い名前を先に消すと、長い名前の一部だけが文に残り、その残りを投稿にないよびかたと見誤るため。
+  // 名前より長いよびかた（名前が「おばあちゃん」のときの「ひいおばあちゃん」）は、名前を消す前に照合する。
+  // 先に名前を消すと、よびかたの一部が消えて、投稿にない人を見逃すため。そこで、名前とよびかたを1つの列にして、長い順に調べる。
+  // 文のほうは記号を除いてあるので、名前も同じ形にしてから探す
+  const postNames = [...new Set(ctx.persons.map((t) => t.replace(SPLITTERS, '')).filter(Boolean))];
   let rest = removeAll(g, FAMILY_BENIGN);
-  for (const w of FAMILY) {
+  for (const w of [...FAMILY, ...postNames].sort((a, b) => b.length - a.length)) {
     if (!rest.includes(w)) continue;
-    if (!ctx.persons.some((t) => t === w || t.startsWith(w))) return `投稿にない家族のよびかた「${w}」がある`;
+    // 投稿の名前そのものはそのまま通す。家族のよびかたは、今までどおりの条件で照合する
+    if (!postNames.includes(w) && !ctx.persons.some((t) => t === w || t.startsWith(w))) return `投稿にない家族のよびかた「${w}」がある`;
     rest = rest.split(w).join('');
   }
   // 「はなこさん」「田中さん」のような名前。さん・くん・ちゃんの前が、投稿の名前か語幹でなければ弾く
