@@ -43,6 +43,11 @@ export function hasInvite(hash) {
 // 家族に送る招待リンク
 export const inviteLink = (origin, code) => `${origin}/#r=${code}`;
 
+// この端末の時計での「きょう」の日付。サーバーと同じく、日本時間から4時間引いた日付（朝4時に日が替わる）。
+// サーバーの日付の代わりではない。同じ端末の時計どうしで「その投稿はきょうのものか」を比べるためだけに使う
+// （時計が合っていなくても、投稿した時と送り直す時の両方が同じ時計なので、比べる分にはずれない）
+export const deviceDay = (ms) => new Date(ms + 5 * 3_600_000).toISOString().slice(0, 10);
+
 // 日付（YYYY-MM-DD）を n 日ずらす。端末の時計は使わず、文字の日付だけで数える
 export const shiftDate = (date, n) => new Date(Date.parse(`${date}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
 
@@ -109,7 +114,10 @@ export function loadShelf(raw) {
   return fitShelf(data.items.slice(0, SHELF_MAX_ITEMS * 2).map(normalizeShelfItem).filter(Boolean));
 }
 
-// 部屋の保存データ（入っている部屋のコード、この端末が送った投稿のID、まだ送れていない投稿）を読む。壊れていれば null
+// 投稿のID → 投稿した日（deviceDay）の控え。ID に __proto__ のような名前が来ても壊れないよう、土台のない入れ物にする
+const newDays = () => Object.create(null);
+
+// 部屋の保存データ（入っている部屋のコード、この端末が送った投稿のID、まだ送れていない投稿、投稿した日の控え）を読む。壊れていれば null
 export function loadRoomRecord(raw) {
   if (typeof raw !== 'string' || raw.length > 64 * 1024) return null;
   let d;
@@ -129,7 +137,14 @@ export function loadRoomRecord(raw) {
       pending.push(r.post);
     }
   }
-  return { code: d.code, sent, pending, lastDay: isDateKey(d.lastDay) ? d.lastDay : '' };
+  // 投稿した日の控え。この控えを足す前の保存データには無い。控えのない投稿は、いつ書いたか分からないので、
+  // 部屋が消えたあとの送り直しの対象にしない（きのうの投稿を、きょうのものとして送ってしまうより、送らないほうがよい）
+  const days = newDays();
+  const known = new Set([...sent, ...pending.map((p) => p.id)]);
+  if (d.days && typeof d.days === 'object' && !Array.isArray(d.days)) {
+    for (const [id, day] of Object.entries(d.days)) if (known.has(id) && isDateKey(day)) days[id] = day;
+  }
+  return { code: d.code, sent, pending, lastDay: isDateKey(d.lastDay) ? d.lastDay : '', days };
 }
 
 // サーバーから届いた番組（きょうの分）を検査する。本文は投稿の写しから取り、検査も表示もその写しで行う。
@@ -184,6 +199,8 @@ export function createRoomClient(env = {}) {
   const origin = env.origin ?? g.location?.origin ?? '';
   const subtle = env.subtle === undefined ? g.crypto?.subtle : env.subtle;
   const randomValues = env.randomValues ?? ((a) => g.crypto.getRandomValues(a));
+  // 端末の時計（ミリ秒）。テストで差し替えるため
+  const now = env.now ?? (() => Date.now());
 
   // 保存は、使えない環境（プライベートウィンドウなど）でも壊れないようにする
   const read = (key) => {
@@ -238,13 +255,18 @@ export function createRoomClient(env = {}) {
   // 動いている同期が、どの部屋のものか（部屋が変わったあと、古い同期の結果を待たせないため）
   let syncingFor = null;
   let exchanged = false;
+  // 部屋が見つからなくなって別の部屋に移ったとき、前の部屋で控えていた「投稿した日」。送り直しが、きょうの分だけを選ぶのに使う
+  let carryDays = newDays();
 
   function persist() {
     if (!rec) {
       forget(ROOM_KEY);
       return;
     }
-    write(ROOM_KEY, JSON.stringify({ v: 1, code: rec.code, sent: rec.sent, pending: rec.pending, lastDay: rec.lastDay }));
+    // 控えは、いま残っている投稿（送った・未送信）の分だけにする
+    const known = new Set([...rec.sent, ...rec.pending.map((p) => p.id)]);
+    for (const id of Object.keys(rec.days)) if (!known.has(id)) delete rec.days[id];
+    write(ROOM_KEY, JSON.stringify({ v: 1, code: rec.code, sent: rec.sent, pending: rec.pending, lastDay: rec.lastDay, days: rec.days }));
   }
   function resetRoomState() {
     today = '';
@@ -258,7 +280,9 @@ export function createRoomClient(env = {}) {
   function setRoom(code) {
     // 別の部屋へ切り替えるときは、前の部屋の未送信の投稿を持ち越さない（別の家族の部屋へ、ことばを送ってしまわないため）。
     // 投稿そのものは、この端末の保存に残っている
-    rec = { code, sent: [], pending: [], lastDay: '' };
+    // 前の部屋が見つからなくなっていたときだけ、その部屋の投稿日の控えを持っていく（requeue が使う）
+    carryDays = rec && lost ? rec.days : newDays();
+    rec = { code, sent: [], pending: [], lastDay: '', days: newDays() };
     resetRoomState();
     persist();
   }
@@ -410,14 +434,18 @@ export function createRoomClient(env = {}) {
     },
     // 部屋が見つからなくなって作り直したとき、きょうの自分の投稿を新しい部屋へ送り直すために使う。ふつうの切り替えでは呼ばない
     // （setRoom は、別の家族の部屋へ投稿を持ち越さないよう未送信を空にする。作り直しのときだけ、呼ぶ側が選んで足す）
+    // 送り直すのは、前の部屋で「きょう」投稿したと控えてある投稿だけ。部屋が消えている間は、前の日の投稿を外す同期（goneIds）が
+    // 成功しないので、ここで日付を見ないと、きのうの投稿が、きょうの投稿として新しい部屋に届いてしまう
     requeue(posts) {
       if (!rec) return { ok: false };
       const have = new Set(rec.pending.map((p) => p.id));
+      const day = deviceDay(now());
       let count = 0;
       for (const raw of Array.isArray(posts) ? posts : []) {
         const c = cleanPost(raw);
-        if (c.ok && !have.has(c.post.id)) {
+        if (c.ok && !have.has(c.post.id) && carryDays[c.post.id] === day) {
           have.add(c.post.id);
+          rec.days[c.post.id] = day;
           rec.pending = [...rec.pending, c.post].slice(0, 30);
           count++;
         }
@@ -428,6 +456,7 @@ export function createRoomClient(env = {}) {
     // 部屋を出る（コードを忘れる）。投稿と本棚は、この端末に残す
     leave() {
       rec = null;
+      carryDays = newDays();
       resetRoomState();
       persist();
     },
@@ -441,6 +470,8 @@ export function createRoomClient(env = {}) {
       const cleaned = cleanPost(post);
       if (!cleaned.ok) return { ok: false, error: cleaned.error };
       const mine = rec;
+      // 投稿した日を控える。送れずに持ち越して、あとの日に送ることもあるので、送れた時ではなく、いま控える
+      mine.days[cleaned.post.id] = deviceDay(now());
       const result = await sendPost(cleaned.post);
       // 通信のあいだに部屋が変わったときは、もとの部屋へは送れていない（投稿は、この端末の保存に残っている）
       if (rec !== mine) return { ok: false, error: '部屋が変わったため、送れませんでした。' };

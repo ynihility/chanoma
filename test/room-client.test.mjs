@@ -8,7 +8,7 @@ import {
   DEVICE_KEY, ROOM_KEY, SHELF_KEY, SHELF_MAX_ITEMS, SHELF_MAX_BYTES,
   parseInvite, hasInvite, inviteLink, shiftDate, datesToOffer, datesToFetch, chunk, fitShelf,
   normalizeShelfItem, programForOffer, loadShelf, loadRoomRecord, checkRoomProgram,
-  loadDeviceKey, hashDeviceKey, createRoomClient,
+  loadDeviceKey, hashDeviceKey, createRoomClient, deviceDay,
 } from '../room.js';
 import { isDeviceHash } from '../safe.js';
 import { SAMPLE_POSTS, SAMPLE_NEWS } from '../sample.js';
@@ -246,8 +246,8 @@ function fakeServer(handler) {
   };
   return { fetch, calls };
 }
-function newClient(server, { storage = memoryStorage(), subtle = crypto.webcrypto.subtle } = {}) {
-  const client = createRoomClient({ storage, fetch: server.fetch, subtle, randomValues: (a) => crypto.getRandomValues(a), origin: 'https://chanoma.example' });
+function newClient(server, { storage = memoryStorage(), subtle = crypto.webcrypto.subtle, now } = {}) {
+  const client = createRoomClient({ storage, fetch: server.fetch, subtle, randomValues: (a) => crypto.getRandomValues(a), origin: 'https://chanoma.example', ...(now ? { now } : {}) });
   return { client, storage };
 }
 const goodPost = (id, extra = {}) => ({ id, who: 'おばあちゃん', topic: 'ごはん', card: 'おかず', ...extra });
@@ -941,7 +941,11 @@ function gatedClient(server) {
 // 止めた通信が fetch に届くまで、少し待つ
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-test('requeue: 部屋が見つからなくなって作り直したあと、きょうの投稿を新しい部屋に送り直す', async () => {
+// 端末の時計のかわり。JST の「年-月-日 時:分」を渡すと、そのミリ秒を返す
+const jst = (text) => Date.parse(`${text.replace(' ', 'T')}:00+09:00`);
+
+// 部屋 CODE に入って posts を投稿し、部屋が消えたあと、新しい部屋 OTHER を作るところまで進める（requeue の手前）
+async function recreatedAfterLoss(postIds, { clock = { ms: jst('2026-11-05 12:00') }, storage = memoryStorage() } = {}) {
   let lostRoom = false;
   const server = fakeServer(({ method, path }) => {
     if (method === 'POST' && path === '/api/room') return { status: 201, body: { code: OTHER } };
@@ -949,13 +953,27 @@ test('requeue: 部屋が見つからなくなって作り直したあと、き�
     if (lostRoom && path.includes(CODE)) return { status: 404, body: { error: 'x' } };
     return okSync();
   });
-  const { client } = newClient(server);
+  const { client } = newClient(server, { storage, now: () => clock.ms });
   await client.enter(CODE);
+  for (const id of postIds) assert.equal((await client.post(goodPost(id))).ok, true);
   lostRoom = true;
   assert.equal((await client.sync()).lost, true);
   assert.equal(client.isLost(), true);
   assert.equal((await client.create()).ok, true);
   assert.equal(client.pendingCount(), 0);
+  return { client, server, storage, clock };
+}
+
+test('deviceDay: 日本時間から4時間引いた日付（朝4時に日が替わる）', () => {
+  assert.equal(deviceDay(jst('2026-11-05 03:59')), '2026-11-04');
+  assert.equal(deviceDay(jst('2026-11-05 04:00')), '2026-11-05');
+  assert.equal(deviceDay(jst('2026-11-05 23:59')), '2026-11-05');
+  assert.equal(deviceDay(jst('2026-11-06 00:30')), '2026-11-05');
+  assert.equal(deviceDay(jst('2026-01-01 03:00')), '2025-12-31');
+});
+
+test('requeue: 部屋が見つからなくなって作り直したあと、きょうの投稿を新しい部屋に送り直す', async () => {
+  const { client, server } = await recreatedAfterLoss(['a1', 'a2']);
   const r = client.requeue([goodPost('a1'), goodPost('a2')]);
   assert.deepEqual(r, { ok: true, count: 2 });
   assert.equal(client.pendingCount(), 2);
@@ -968,18 +986,130 @@ test('requeue: 部屋が見つからなくなって作り直したあと、き�
   assert.equal(client.pendingCount(), 0);
 });
 
-test('requeue: 同じ id は1件だけ。壊れた投稿は捨てる。30件を超えない。部屋に入っていなければ ok:false', async () => {
-  const server = fakeServer(() => okSync());
-  const { client, storage } = newClient(server);
-  assert.deepEqual(client.requeue([goodPost('a1')]), { ok: false });
+test('requeue: きのうの投稿は送り直さない。きょうの投稿だけ送る（一晩おいて部屋が消えたとき）', async () => {
+  const storage = memoryStorage();
+  const clock = { ms: jst('2026-11-04 19:00') };
+  // きのう、部屋 CODE に a1 を投稿する
+  const first = newClient(fakeServer(({ method, path }) => (method === 'POST' && path.endsWith('/posts') ? { status: 200, body: {} } : okSync({ day: YESTERDAY }))), { storage, now: () => clock.ms });
+  await first.client.enter(CODE);
+  assert.equal((await first.client.post(goodPost('a1'))).ok, true);
+  // 一晩おいた。きょうの朝、端末を開き直して a2 を投稿する（保存から読み直すので、控えが保存に残っていることも確かめる）
+  clock.ms = jst('2026-11-05 08:00');
+  let lostRoom = false;
+  const server = fakeServer(({ method, path }) => {
+    if (method === 'POST' && path === '/api/room') return { status: 201, body: { code: OTHER } };
+    if (method === 'POST' && path.endsWith('/posts')) return { status: 200, body: {} };
+    if (lostRoom && path.includes(CODE)) return { status: 404, body: { error: 'x' } };
+    return okSync();
+  });
+  const { client } = newClient(server, { storage, now: () => clock.ms });
+  assert.equal(client.code(), CODE);
+  assert.equal((await client.post(goodPost('a2'))).ok, true);
+  // 夜、サーバーが寝て部屋が消えた。同期は 404 になり、前の日の投稿を外す処理（goneIds）は走らない
+  clock.ms = jst('2026-11-05 19:00');
+  lostRoom = true;
+  const lostSync = await client.sync();
+  assert.equal(lostSync.lost, true);
+  assert.equal(lostSync.goneIds, undefined);
+  assert.equal(client.isMine('a1'), true);
+  assert.equal((await client.create()).ok, true);
+  // 画面は、端末の一覧にある自分の投稿を全部渡す。きのうの a1 は送り直さず、きょうの a2 だけ送り直す
+  assert.deepEqual(client.requeue([goodPost('a1'), goodPost('a2')]), { ok: true, count: 1 });
+  assert.equal(client.isMine('a1'), false);
+  assert.equal(client.isMine('a2'), true);
+  server.calls.length = 0;
+  assert.equal((await client.sync()).ok, true);
+  const posted = server.calls.filter((c) => c.method === 'POST' && c.path === `/api/room/${OTHER}/posts`);
+  assert.deepEqual(posted.map((c) => c.body.post.id), ['a2']);
+});
+
+test('requeue: きのうの投稿だけのときは、何も送り直さない（0件）', async () => {
+  const clock = { ms: jst('2026-11-04 20:00') };
+  const { client, server } = await recreatedAfterLoss(['a1'], { clock });
+  clock.ms = jst('2026-11-05 20:00');
+  assert.deepEqual(client.requeue([goodPost('a1')]), { ok: true, count: 0 });
+  server.calls.length = 0;
+  await client.sync();
+  assert.equal(server.calls.filter((c) => c.path.endsWith('/posts')).length, 0);
+});
+
+test('requeue: 投稿した日の控えがない投稿（この仕組みの前の保存データなど）は、送り直さない', async () => {
+  const storage = memoryStorage();
+  // 控え（days）のない古い保存データ
+  storage.setItem(ROOM_KEY, JSON.stringify({ v: 1, code: CODE, sent: ['a1'], pending: [], lastDay: TODAY }));
+  let lostRoom = false;
+  const server = fakeServer(({ method, path }) => {
+    if (method === 'POST' && path === '/api/room') return { status: 201, body: { code: OTHER } };
+    if (lostRoom && path.includes(CODE)) return { status: 404, body: { error: 'x' } };
+    return okSync();
+  });
+  const { client } = newClient(server, { storage, now: () => jst('2026-11-05 12:00') });
+  lostRoom = true;
+  assert.equal((await client.sync()).lost, true);
+  assert.equal((await client.create()).ok, true);
+  assert.deepEqual(client.requeue([goodPost('a1')]), { ok: true, count: 0 });
+});
+
+test('requeue: 送り直した投稿は、また部屋が消えても、同じ日ならもう一度送り直せる', async () => {
+  const clock = { ms: jst('2026-11-05 12:00') };
+  let roomLost = '';
+  const server = fakeServer(({ method, path }) => {
+    if (method === 'POST' && path === '/api/room') return { status: 201, body: { code: roomLost === CODE ? OTHER : CODE } };
+    if (method === 'POST' && path.endsWith('/posts')) return { status: 200, body: {} };
+    if (roomLost && path.includes(roomLost)) return { status: 404, body: { error: 'x' } };
+    return okSync();
+  });
+  const { client } = newClient(server, { now: () => clock.ms });
   await client.enter(CODE);
+  await client.post(goodPost('a1'));
+  roomLost = CODE;
+  assert.equal((await client.sync()).lost, true);
+  await client.create();
+  assert.equal(client.requeue([goodPost('a1')]).count, 1);
+  await client.sync();
+  assert.equal(client.pendingCount(), 0);
+  // 2つ目の部屋も消えた。もう一度作り直して、同じ日の投稿を送り直せる
+  roomLost = OTHER;
+  assert.equal((await client.sync()).lost, true);
+  server.calls.length = 0;
+  roomLost = '';
+  const again = await client.create();
+  assert.equal(again.ok, true);
+  assert.equal(client.requeue([goodPost('a1')]).count, 1);
+});
+
+test('部屋の保存: 投稿した日の控えは、残っている投稿の分だけ保存し、読み直せる', async () => {
+  const storage = memoryStorage();
+  const clock = { ms: jst('2026-11-05 12:00') };
+  const server = fakeServer(({ method, path }) => (method === 'POST' && path.endsWith('/posts') ? { status: 200, body: {} } : okSync()));
+  const { client } = newClient(server, { storage, now: () => clock.ms });
+  await client.enter(CODE);
+  await client.post(goodPost('a1'));
+  await client.post(goodPost('a2'));
+  assert.deepEqual(JSON.parse(storage.getItem(ROOM_KEY)).days, { a1: TODAY, a2: TODAY });
+  await client.remove('a1');
+  assert.deepEqual(JSON.parse(storage.getItem(ROOM_KEY)).days, { a2: TODAY });
+  // 読み直し: 残っていない投稿の控えと、日付でない値は捨てる
+  const rec = loadRoomRecord(JSON.stringify({ v: 1, code: CODE, sent: ['a2'], days: { a2: TODAY, zz: TODAY, a3: 'x' } }));
+  assert.deepEqual({ ...rec.days }, { a2: TODAY });
+  assert.deepEqual({ ...loadRoomRecord(JSON.stringify({ v: 1, code: CODE, sent: ['a2'], days: 5 })).days }, {});
+});
+
+test('requeue: 同じ id は1件だけ。壊れた投稿は捨てる。部屋に入っていなければ ok:false', async () => {
+  const idle = newClient(fakeServer(() => okSync())).client;
+  assert.deepEqual(idle.requeue([goodPost('a1')]), { ok: false });
+  const { client, storage } = await recreatedAfterLoss(['a1']);
   assert.deepEqual(client.requeue([goodPost('a1'), goodPost('a1'), { id: 'x', who: '' }, null]), { ok: true, count: 1 });
   assert.deepEqual(client.requeue([goodPost('a1')]), { ok: true, count: 0 });
   assert.equal(client.pendingCount(), 1);
   // 保存にも残る
   assert.equal(JSON.parse(storage.getItem(ROOM_KEY)).pending.length, 1);
-  const many = Array.from({ length: 40 }, (_, i) => goodPost(`m${i}`));
-  client.requeue(many);
+});
+
+test('requeue: 未送信は30件まで', async () => {
+  const ids = Array.from({ length: 40 }, (_, i) => `m${i}`);
+  const { client } = await recreatedAfterLoss(ids);
+  client.requeue(ids.map((id) => goodPost(id)));
   assert.equal(client.pendingCount(), 30);
 });
 
