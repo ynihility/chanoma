@@ -1014,3 +1014,26 @@ for (const [label, people, host] of [
     assert.match(r.reason, /見えない文字/);
   });
 }
+
+// ---- 絵文字をつなぐ U+200D は、区切りの記号と同じように除いて、禁止語や名前を照合する ----
+// (a) 名前が「家族の絵文字＋ばあば」のとき、司会が文字の部分だけで「ばあば」と呼んでも、投稿の名前として通す
+// (b) つないだ絵文字の名前を禁止語の間に挟んでも（「健」名前「康」）、健康などの検査をすり抜けない
+test('通す(つないだ絵文字の名前): よびかたが「家族の絵文字＋ばあば」のとき、司会が「ばあば」とだけ呼ぶ', () => {
+  const r = callPeople([FAMILY3 + 'ばあば'], ['ばあばのひとことです。']);
+  assert.equal(r.ok, true, r.reason);
+});
+test('弾く(つないだ絵文字の名前): 投稿にないよびかたは、名前がつないだ絵文字つきでも今までどおり弾く', () => {
+  const r = callPeople([FAMILY3 + 'ばあば'], ['じいじのひとことです。']);
+  assert.equal(r.ok, false, '通ってしまった');
+  assert.match(r.reason, /家族のよびかた/);
+});
+for (const [label, before, after, reason] of [
+  ['健康', '健', '康のお話です。', /健康や孤独/],
+  ['順位（ベスト）', 'ベ', 'ストのお話です。', /順位/],
+]) {
+  test(`弾く(つないだ絵文字の名前): 「${label}」を、つないだ絵文字のニックネームで分断しても弾く`, () => {
+    const r = callPeople([{ who: 'まご', name: FAMILY3 }], [before + FAMILY3 + after]);
+    assert.equal(r.ok, false, '通ってしまった');
+    assert.match(r.reason, reason);
+  });
+}
