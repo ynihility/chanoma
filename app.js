@@ -25,7 +25,7 @@ const CARDS = {
 // コーナーの題字。語のまとまりごとに分けておく（折れるときは、まとまりの切れ目で折れる）
 const CORNER_TITLES = { 'ひとこと': ['きょうの一言'], 'むかし': ['むかし話', 'コーナー'], 'つぎ': ['つぎに会う日'] };
 // 司会の言葉の中で、途中で折れてほしくない決まった語（よびかたとニックネームは、画面に出すときに足す）
-const FIXED_WORDS = ['ひとこと', 'むかし話', 'コーナー', 'つぎに会う日', '会いたい日', '夜7時', 'かぞくニュース', 'テレ吉', 'もう一度'];
+const FIXED_WORDS = ['ひとこと', 'むかし話', 'コーナー', 'つぎに会う日', '会いたい日', '夜7時', 'かぞくニュース', 'テレ吉', 'もう一度', '見本の番組'];
 
 const $ = (id) => document.getElementById(id);
 // 要素を作り、文字は textContent で入れる
@@ -49,7 +49,8 @@ function nwJoin(parent, parts, separator = '　') {
 // 文の中の「折れてほしくない語」（よびかた・ニックネーム・決まった語）を見つけて、nw の箱で包む。
 // 文字そのものは変えず、箱に入れるだけ。1文字の語は、もともと途中で折れないので対象にしない
 function guard(text) {
-  const words = [...roles(), ...state.posts.flatMap((p) => [p.who, p.name ?? '']), ...FIXED_WORDS];
+  // 放送中の投稿（見本の番組なら見本の投稿）の名前も、箱に入れる対象にする
+  const words = [...roles(), ...state.posts.flatMap((p) => [p.who, p.name ?? '']), ...(show.posts ?? []).flatMap((p) => [p.who, p.name ?? '']), ...FIXED_WORDS];
   // 長い語から先に探す（短い語が、長い語の一部だけを先に取ってしまわないように）
   const list = [...new Set(words)].filter((w) => w.length >= 2).sort((a, b) => b.length - a.length);
   const re = new RegExp(list.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
@@ -102,7 +103,8 @@ const pick ={ topic: '', card: '', headline: '' };
 const profiles = Object.create(null);
 for (const p of state.posts) profiles[p.who] = { animal: p.animal ?? '', nick: p.name ?? '' };
 const profile = () => (profiles[role] ??= { animal: '', nick: '' });
-// 放送中の状態。steps は順に映す内容、index は今の位置
+// 放送中の状態。steps は順に映す内容、index は今の位置。
+// 見本の番組のときだけ、sample が true になり、posts に見本の投稿が入る（本物の番組では持たない）
 let show = { steps: [], index: 0 };
 // いま動いている画面の演出（なければ null）
 let run = null;
@@ -569,12 +571,31 @@ function buildSteps(news, posts, nextDate) {
   ];
 }
 
+// 「AI」の札。見本の番組では「AI（見本）」にして、いまの AI が書いた本物の言葉と取り違えないようにする
+function aiChip() {
+  return el('span', show.sample ? 'AI（見本）' : 'AI', show.sample ? 'ai-chip sample-chip' : 'ai-chip');
+}
+
+// 見本の番組のすべての場面の、いちばん上に出す帯。画面の中に置くので、テレビだけを切り取って録画しても残る
+function sampleBand() {
+  const band = el('p', undefined, 'sample-band');
+  // 語のまとまりごとに箱へ入れる（狭い画面でも、まとまりの切れ目で折れる）
+  nwJoin(band, ['見本の番組です', '（きょうの投稿', 'ではありません）'], '');
+  return band;
+}
+
+// テレビの下の注記を、いま映しているものに合わせる（見本の番組のときは、見本用の注記）
+function syncSlip() {
+  $('slip').hidden = Boolean(show.sample);
+  $('slip-sample').hidden = !show.sample;
+}
+
 // 司会のつなぎの言葉。テレ吉（飾り）の横に吹き出しを出し、中に「AI」の札を入れる（家族の短冊と見分けるため）
 function hostLine(text) {
   const row = el('div', undefined, 'host-row');
   const bubble = el('p', undefined, 'host');
   // 文字は元のまま。よびかたなどの語だけ、途中で折れない箱に入れる
-  bubble.append(el('span', 'AI', 'ai-chip'), ...guard(text));
+  bubble.append(aiChip(), ...guard(text));
   row.append(spriteCanvas('テレ吉', 4, undefined, { shadow: true }), bubble);
   return row;
 }
@@ -586,12 +607,16 @@ function setScreen(...nodes) {
     if (!child.classList.contains('fx')) child.remove();
   }
   screen.append(...nodes);
+  // 画面の中身を替えるときに、下の注記も合わせる（show は、これを呼ぶ前に新しいものに替わっている）
+  syncSlip();
 }
 
 // いまの場面を、画面にすぐ描く。still が true のときは、中身がふわっと出る動きを付けない（演出の中で入れ替えるとき）
 function renderStep(still = false) {
   const step = show.steps[show.index];
   const wrap = el('div', undefined, still ? 'fade still' : 'fade');
+  // 見本の番組は、どの場面にも帯を付ける
+  if (show.sample) wrap.append(sampleBand());
   if (step.kind === 'segment') {
     wrap.append(titleLine(CORNER_TITLES[step.corner] ?? []), hostLine(step.host));
     if (step.corner === 'つぎ') wrap.append(meetLine(step.nextDate));
@@ -675,6 +700,24 @@ function showError(message) {
   const next = el('p', undefined, 'notice');
   nwJoin(next, ['投稿は', '消えていません。', '「もう一度つくる」', 'を押してください。'], '');
   wrap.append(next);
+  // 番組が作れなくても、番組の流れを見られるように、見本の番組への入口を出す。自動では流さず、押したときだけ流す。
+  // 下の帯（「もう一度つくる」「投稿にもどる」）には足さず、画面の中に置く
+  const alt = el('p', undefined, 'notice');
+  alt.append(...guard('かわりに、見本の番組を見ることもできます。'));
+  const go = el('button', '見本の番組をみる', 'sample-go');
+  go.type = 'button';
+  // 見本を読み込めなかったときの知らせは、ボタンの下に出す
+  const goFail = el('p', undefined, 'notice');
+  goFail.hidden = true;
+  go.addEventListener('click', () => {
+    play('tap');
+    goFail.hidden = true;
+    watchSample((text) => {
+      goFail.textContent = text;
+      goFail.hidden = false;
+    });
+  });
+  wrap.append(alt, go, goFail);
   setScreen(wrap);
   $('next').hidden = true;
   // 押すと、いまの投稿で、もう一度番組を頼む（回数の上限はサーバーが見ている）
@@ -715,6 +758,8 @@ const READY_MESSAGE = '番組ができました。「番組をみる」を押す
 // 「夜7時にする」のボタンの文字と、押せるかどうかを、いまの状態に合わせる
 function syncEvening() {
   const button = $('evening');
+  // 本物の番組を待っているあいだは、見本のボタンも押せない（届いた番組と見本が入れ替わってしまうため）
+  $('sample').disabled = waiting;
   if (waiting) {
     button.disabled = true;
     button.textContent = 'テレ吉が準備中…';
@@ -744,6 +789,45 @@ function watch(r, fromWaiting) {
     renderStep();
   }
   syncEvening();
+}
+
+// 投稿の一覧の下にある「見本の番組をみる」の下の案内（見本を読み込めなかったときなど）
+function sampleMsg(message) {
+  $('sample-msg').textContent = message;
+  $('sample-msg').hidden = !message;
+}
+
+// 見本の番組を読み込んで、テレビで流す。読み込めなかったときは、押した場所の近くに出す知らせ（onFail）で伝える。
+// 家族の投稿（state.posts）・保存・できていた番組（ready）には触らない。
+// 本物の番組を待っているあいだは流さない（届いた番組と入れ替わってしまうため）
+async function watchSample(onFail) {
+  if (waiting) return;
+  cancelVoice();
+  let sample;
+  try {
+    sample = await import('./sample.js');
+  } catch {
+    onFail('見本の番組を読み込めませんでした。');
+    return;
+  }
+  // 本物と同じ決まりに合っていることを、毎回確かめてから使う
+  const cleaned = cleanPosts({ posts: sample.SAMPLE_POSTS });
+  const checked = cleaned.ok ? checkNews(sample.SAMPLE_NEWS, cleaned.posts) : null;
+  if (!checked?.ok) {
+    onFail('見本の番組を用意できませんでした。');
+    return;
+  }
+  // 読み込んでいるあいだに本物の番組を頼まれていたら、そちらを優先する
+  if (waiting) return;
+  // 見本には、つぎに会う日（nextDate）がないので、「決まったらここに出ます」の行になる
+  show = { steps: buildSteps(checked.news, cleaned.posts), index: 0, sample: true, posts: cleaned.posts };
+  sampleMsg('');
+  $('next').hidden = false;
+  $('retry').hidden = true;
+  updateNext();
+  setView(true);
+  play('tvon');
+  renderStep();
 }
 
 // うまく作れなかったとき。テレビを見ていればテレビに、投稿に戻っていれば投稿の画面に知らせる
@@ -850,6 +934,11 @@ $('clear').addEventListener('click', () => {
 });
 $('evening').addEventListener('click', goEvening);
 $('retry').addEventListener('click', goEvening);
+$('sample').addEventListener('click', () => {
+  play('tap');
+  sampleMsg('');
+  watchSample(sampleMsg);
+});
 $('next').addEventListener('click', () => {
   // 演出の途中で押されたら、演出だけを終わらせて、いまの場面をすぐ見せる（場面は飛ばさない）
   if (run) {
@@ -873,6 +962,7 @@ $('sound').addEventListener('click', () => {
 $('back').addEventListener('click', () => {
   setView(false);
   say('');
+  sampleMsg('');
 });
 
 // 音声入力。聞き取った言葉は入力欄に入れるだけで、送らない（人が文字で確かめてから「おくる」を押す）

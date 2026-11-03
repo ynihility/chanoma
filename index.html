@@ -665,6 +665,24 @@
     .screen .host::after { top: 24px; left: -20px; border-width: 10px; border-right-color: #1F4538; }
     /* アプリ自身のお知らせ（番組を作れなかったときなど）。AI の言葉ではないので、吹き出しにはしない */
     .screen .notice { font-size: 28px; line-height: 1.6; margin: 0 0 var(--gap-5); overflow-wrap: anywhere; word-break: auto-phrase; }
+    /* 失敗の画面の「見本の番組をみる」（画面の中に置く） */
+    .screen .sample-go { margin: 0 0 var(--gap-5); }
+    /* 見本の番組のすべての場面の、いちばん上の帯。紙の地に朱の帯で、お知らせだと分かるようにする（家族の短冊とは形が違う） */
+    .screen .sample-band {
+      margin: 0 0 var(--gap-4);
+      padding: var(--gap-2) var(--gap-4);
+      font-size: 24px;
+      font-weight: 700;
+      line-height: 1.5;
+      color: var(--ink);
+      background: var(--paper);
+      border: 3px solid var(--ink);
+      border-left: 14px solid var(--shu);
+      border-radius: 4px;
+      box-shadow: 5px 5px 0 var(--ink);
+      overflow-wrap: anywhere;
+      word-break: auto-phrase;
+    }
     /* 暗い画面では濃茶の輪郭が沈むので、絵のまわりに淡い縁取りを付ける */
     .screen .sprite {
       filter: drop-shadow(1px 0 0 var(--crt-light)) drop-shadow(-1px 0 0 var(--crt-light))
@@ -683,6 +701,8 @@
       border-radius: 4px;
       vertical-align: 0.15em;
     }
+    /* 見本の番組の札「AI（見本）」: 紙の色にして、本物の AI の札（山吹）と見分ける */
+    .ai-chip.sample-chip { background: var(--paper); border: 2px solid var(--ink); }
     .screen .meet { font-size: 28px; font-weight: 700; color: var(--yamabuki); margin: 0 0 var(--gap-4); }
     /* 家族の言葉の短冊: 紙の地に濃い茶の文字。上に朱の帯と、ひもを通す穴 */
     .screen .post {
@@ -856,6 +876,9 @@
     }
     .tv-legs span:first-child { transform: skewX(12deg); }
     .tv-legs span:last-child { transform: skewX(-12deg); }
+    /* 投稿の一覧の下の「見本の番組をみる」と、その案内 */
+    .sample-entry { margin-top: var(--gap-5); }
+    .sample-entry .row { margin-bottom: var(--gap-2); }
     /* テレビの下の注記: 畳の上に直接置かず、紙の短冊にのせる */
     .slip {
       margin: var(--gap-4) 0 0;
@@ -1052,6 +1075,14 @@
         <button id="clear">ぜんぶ消す</button>
       </div>
       <ul id="posts" class="posts"></ul>
+      <!-- 見本の番組への入口。きょうの投稿は使わない。本物の番組を待っているあいだは、app.js が押せなくする -->
+      <div class="sample-entry">
+        <div class="row">
+          <button id="sample" type="button">見本の番組をみる</button>
+        </div>
+        <p class="note">つくりものの家族の番組です。きょうの投稿は使わず、AI にも送りません。</p>
+        <div role="status"><p id="sample-msg" class="msg" hidden></p></div>
+      </div>
     </section>
 
     <section id="tv-view" hidden aria-label="夜7時のかぞくニュース">
@@ -1071,7 +1102,9 @@
         </div>
       </div>
       <div class="tv-legs" aria-hidden="true"><span></span><span></span></div>
-      <p class="note slip"><span class="nw">つなぎの言葉</span>は「AI」が付けました。<span class="nw">みなさんの言葉</span>は、そのまま出しています。</p>
+      <p class="note slip" id="slip"><span class="nw">つなぎの言葉</span>は「AI」が付けました。<span class="nw">みなさんの言葉</span>は、そのまま出しています。</p>
+      <!-- 見本の番組のときだけ、上の注記のかわりに出す（app.js が hidden を切り替える） -->
+      <p class="note slip" id="slip-sample" hidden>これは<span class="nw">見本の番組</span>です。アプリに入っている、<span class="nw">つくりものの家族</span>の投稿と文を流しています（AI には送っていません）。</p>
     </section>
   </main>
 
