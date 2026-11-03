@@ -535,3 +535,294 @@ test('なつかしい: なつかしい の今日の投稿を つぎ に置くと
   assert.equal(r.ok, false);
   assert.equal(r.reason, '投稿とコーナーが合わない');
 });
+
+// ---- 今夜の特集名と、コーナーごとの編成のわけ ----
+import { FEATURES, REASONS, CORNERS, NEXT_TOPICS, reasonFact } from '../safe.js';
+
+// 編成のわけ（safe.js の REASONS と同じ言葉。言葉が変わったときに、ここで気づけるように書き出している）
+const R1 = 'きょうのことを集めました';
+const R2 = 'つぎに会う日の希望を集めました';
+const R3 = '「なつかしい」をえらんだ投稿です';
+const R4 = 'むかしの話が書かれています';
+const R5 = '同じお題をえらんだ人がいます';
+const R6 = '同じ札をえらんだ人がいます';
+const R7 = '同じ見出しをえらんだ人がいます';
+const R8 = '同じ日に会いたい人がいます';
+const R9 = 'ちがう人が、かわるがわる出ます';
+
+test('一覧: 特集名は10個、編成のわけは9個で、決めた言葉のとおり', () => {
+  assert.deepEqual(FEATURES, [
+    'ごはん特集', 'そら特集', 'したこと特集', 'みつけた特集', 'うれしかった特集',
+    'おいしかった特集', 'びっくり特集', 'なつかしい特集', 'つぎに会う日特集', 'かぞくの一言特集',
+  ]);
+  assert.deepEqual(REASONS, [R1, R2, R3, R4, R5, R6, R7, R8, R9]);
+});
+
+// 検査用の番組を、投稿の一覧から作る。今日の投稿は ひとこと、なつかしいを選んだ投稿は むかし、希望の投稿は つぎ に置く
+const cornerOf = (p) => (NEXT_TOPICS.includes(p.topic) ? 'つぎ' : isNostalgic(p) ? 'むかし' : 'ひとこと');
+const programFor = (ps, plan = {}) => ({
+  opening: 'こんばんは、テレ吉です。',
+  segments: CORNERS.flatMap((corner) =>
+    ps.filter((p) => cornerOf(p) === corner).map((p) => ({ corner, from: p.id, host: '次の話です。' }))),
+  closing: 'おやすみなさい。',
+  ...plan,
+});
+const tp = (id, topic, o = {}) => ({ id, who: 'おばあちゃん', topic, ...o });
+const L = (corner, reason) => ({ corner, reason });
+const goodLineup = () => [L('ひとこと', R1), L('むかし', R3), L('つぎ', R2)];
+// goodNews（p3 が むかし にある）に、特集名と lineup を足した番組
+const planOf = (lineup, feature = 'かぞくの一言特集') => ({ ...goodNews(), feature, lineup });
+
+test('特集名と編成のわけ: 正しい feature と lineup を足した番組は通り、同じ値が新しいオブジェクトで返る', () => {
+  const lineup = goodLineup();
+  const r = checkNews(planOf(lineup), posts);
+  assert.equal(r.ok, true, r.reason);
+  assert.equal(r.news.feature, 'かぞくの一言特集');
+  assert.deepEqual(r.news.lineup, goodLineup());
+  assert.notEqual(r.news.lineup, lineup);
+  assert.notEqual(r.news.lineup[0], lineup[0]);
+});
+
+test('特集名と編成のわけ: feature も lineup もない番組は今までどおり通り、返す番組にも入らない', () => {
+  for (const news of [goodNews(), { ...goodNews(), feature: undefined, lineup: undefined }]) {
+    const r = checkNews(news, posts);
+    assert.equal(r.ok, true, r.reason);
+    assert.equal('feature' in r.news, false);
+    assert.equal('lineup' in r.news, false);
+  }
+});
+
+test('特集名と編成のわけ: どちらか片方だけでも通る（それぞれ「あれば検査する」）', () => {
+  assert.equal(checkNews({ ...goodNews(), feature: 'かぞくの一言特集' }, posts).ok, true);
+  const r = checkNews({ ...goodNews(), lineup: goodLineup() }, posts);
+  assert.equal(r.ok, true, r.reason);
+  assert.equal('feature' in r.news, false);
+});
+
+// 特集名ごとに [条件に合う投稿, 条件に合わない投稿]。数えるのは件数なので、同じ人の2件でも特集になる
+const FEATURE_CASES = [
+  ['ごはん特集', [tp('a', 'ごはん'), tp('b', 'ごはん')], [tp('a', 'ごはん'), tp('b', 'そら')]],
+  ['そら特集', [tp('a', 'そら'), tp('b', 'そら')], [tp('a', 'そら'), tp('b', 'ごはん')]],
+  ['したこと特集', [tp('a', 'したこと'), tp('b', 'したこと')], [tp('a', 'したこと'), tp('b', 'そら')]],
+  ['みつけた特集', [tp('a', 'みつけた'), tp('b', 'みつけた')], [tp('a', 'みつけた'), tp('b', 'そら')]],
+  // 見出しの特集は、今日の投稿だけで数える。希望の投稿に付いた見出しは数えない
+  ['うれしかった特集',
+    [tp('a', 'そら', { headline: 'うれしかった' }), tp('b', 'ごはん', { headline: 'うれしかった' })],
+    [tp('a', 'そら', { headline: 'うれしかった' }), tp('b', 'なに食べたい', { headline: 'うれしかった' })]],
+  ['おいしかった特集',
+    [tp('a', 'ごはん', { headline: 'おいしかった' }), tp('b', 'そら', { headline: 'おいしかった' })],
+    [tp('a', 'ごはん', { headline: 'おいしかった' }), tp('b', 'なに食べたい', { headline: 'おいしかった' })]],
+  ['びっくり特集',
+    [tp('a', 'そら', { headline: 'びっくり' }), tp('b', 'ごはん', { headline: 'びっくり' })],
+    [tp('a', 'そら', { headline: 'びっくり' }), tp('b', 'なに食べたい', { headline: 'びっくり' })]],
+  // なつかしい特集は、見出しで選んだ投稿と、札で選んだ投稿を合わせて数える。希望の投稿は数えない
+  ['なつかしい特集',
+    [tp('a', 'みつけた', { headline: 'なつかしい' }), tp('b', 'みつけた', { card: 'なつかしいもの' })],
+    [tp('a', 'みつけた', { headline: 'なつかしい' }), tp('b', 'なに食べたい', { headline: 'なつかしい' })]],
+  ['つぎに会う日特集', [tp('a', 'なに食べたい'), tp('b', 'どこ行きたい')], [tp('a', 'なに食べたい'), tp('b', 'そら')]],
+];
+for (const [feature, fit, unfit] of FEATURE_CASES) {
+  test(`特集名: ${feature} は条件に合えば通り、合わなければ「特集名が投稿と合わない」で弾く`, () => {
+    const ok = checkNews(programFor(fit, { feature }), fit);
+    assert.equal(ok.ok, true, ok.reason);
+    assert.equal(ok.news.feature, feature);
+    const ng = checkNews(programFor(unfit, { feature }), unfit);
+    assert.equal(ng.ok, false);
+    assert.equal(ng.reason, '特集名が投稿と合わない');
+  });
+}
+test('特集名: かぞくの一言特集以外の9つが、すべて条件の確かめを持っている', () => {
+  assert.deepEqual(FEATURE_CASES.map(([feature]) => feature), FEATURES.filter((f) => f !== 'かぞくの一言特集'));
+});
+test('特集名: かぞくの一言特集は、どんな投稿でも通る', () => {
+  const single = [tp('a', 'そら')];
+  assert.equal(checkNews(programFor(single, { feature: 'かぞくの一言特集' }), single).ok, true);
+  assert.equal(checkNews(planOf(goodLineup()), posts).ok, true);
+});
+for (const [name, value] of [['一覧にない言葉', 'ほげ特集'], ['空の文字', ''], ['数', 5], ['null', null], ['オブジェクト', {}], ['配列', ['そら特集']]]) {
+  test(`特集名: 弾く（形が違う） - ${name}`, () => {
+    const r = checkNews({ ...goodNews(), feature: value }, posts);
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, '特集名の形が違う');
+  });
+}
+
+// 編成のわけごとに [わけ, コーナー, そのコーナーの投稿, 期待する答え]。null は当てはまらない、{} は補足なしで当てはまる
+const OBA = 'おばあちゃん';
+const MAGO = 'まご';
+const OKA = 'おかあさん';
+const OTO = 'おとうさん';
+const rp = (who, o = {}) => ({ who, topic: 'そら', ...o });
+const wp = (who, wishDate) => rp(who, { topic: 'いつ会いたい', wishDate });
+const REASON_CASES = [
+  // R1・R2: そのコーナーのときだけ
+  [R1, 'ひとこと', [rp(OBA)], {}],
+  [R1, 'むかし', [rp(OBA)], null],
+  [R1, 'つぎ', [rp(OBA)], null],
+  [R2, 'つぎ', [rp(OBA, { topic: 'どこ行きたい' })], {}],
+  [R2, 'ひとこと', [rp(OBA)], null],
+  [R2, 'むかし', [rp(OBA)], null],
+  // R3: むかし のコーナーに、なつかしいを選んだ投稿（見出しでも札でも）があるとき
+  [R3, 'むかし', [rp(OBA, { headline: 'なつかしい' })], {}],
+  [R3, 'むかし', [rp(OBA, { topic: 'みつけた', card: 'なつかしいもの' })], {}],
+  [R3, 'むかし', [rp(OBA, { text: '古い話' })], null],
+  [R3, 'ひとこと', [rp(OBA, { headline: 'なつかしい' })], null],
+  // R4: むかし のコーナーに、本文のある投稿があるとき
+  [R4, 'むかし', [rp(OBA, { text: '古い話' })], {}],
+  [R4, 'むかし', [rp(OBA), rp(MAGO, { text: '古い話' })], {}],
+  [R4, 'むかし', [rp(OBA, { headline: 'なつかしい' })], null],
+  [R4, 'ひとこと', [rp(OBA, { text: '古い話' })], null],
+  // R5: ちがう人どうしで、お題が同じ
+  [R5, 'ひとこと', [rp(OBA, { topic: 'そら' }), rp(MAGO, { topic: 'そら' })], { kind: 'topic', value: 'そら' }],
+  [R5, 'つぎ', [rp(OBA, { topic: 'どこ行きたい' }), rp(MAGO, { topic: 'どこ行きたい' })], { kind: 'topic', value: 'どこ行きたい' }],
+  [R5, 'ひとこと', [rp(OBA, { topic: 'そら' }), rp(OBA, { topic: 'そら' })], null],
+  [R5, 'ひとこと', [rp(OBA, { topic: 'そら' }), rp(MAGO, { topic: 'ごはん' })], null],
+  // R6: ちがう人どうしで、札が同じ（札のない投稿は数えない）
+  [R6, 'ひとこと', [rp(OBA, { card: 'うみ' }), rp(MAGO, { card: 'うみ' })], { kind: 'card', value: 'うみ' }],
+  [R6, 'ひとこと', [rp(OBA, { card: 'うみ' }), rp(OBA, { card: 'うみ' })], null],
+  [R6, 'ひとこと', [rp(OBA), rp(MAGO)], null],
+  [R6, 'ひとこと', [rp(OBA, { card: 'うみ' }), rp(MAGO, { card: 'やま' })], null],
+  // R7: ちがう人どうしで、見出しが同じ
+  [R7, 'ひとこと', [rp(OBA, { headline: 'びっくり' }), rp(MAGO, { headline: 'びっくり' })], { kind: 'headline', value: 'びっくり' }],
+  [R7, 'ひとこと', [rp(OBA, { headline: 'びっくり' }), rp(OBA, { headline: 'びっくり' })], null],
+  [R7, 'ひとこと', [rp(OBA), rp(MAGO)], null],
+  [R7, 'ひとこと', [rp(OBA, { headline: 'びっくり' }), rp(MAGO, { headline: 'うれしかった' })], null],
+  // R8: つぎ のコーナーで、ちがう人どうしの会いたい日が同じ
+  [R8, 'つぎ', [wp(OBA, '2026-11-23'), wp(MAGO, '2026-11-23')], { kind: 'wishDate', value: '2026-11-23' }],
+  [R8, 'つぎ', [wp(OBA, '2026-11-23'), wp(OBA, '2026-11-23')], null],
+  [R8, 'つぎ', [wp(OBA, '2026-11-23'), wp(MAGO, '2026-11-24')], null],
+  [R8, 'ひとこと', [wp(OBA, '2026-11-23'), wp(MAGO, '2026-11-23')], null],
+  // R9: 投稿が2件以上で、となりあう投稿がどれもちがう人
+  [R9, 'ひとこと', [rp(OBA), rp(MAGO)], {}],
+  [R9, 'ひとこと', [rp(OBA), rp(MAGO), rp(OBA)], {}],
+  [R9, 'ひとこと', [rp(OBA), rp(MAGO), rp(OKA)], {}],
+  [R9, 'ひとこと', [rp(OBA), rp(OBA)], null],
+  [R9, 'ひとこと', [rp(OBA), rp(MAGO), rp(MAGO)], null],
+  [R9, 'ひとこと', [rp(OBA)], null],
+];
+REASON_CASES.forEach(([reason, corner, ps, expected], i) => {
+  const who = ps.map((p) => p.who).join('→');
+  test(`編成のわけ ${i + 1}: ${reason} / ${corner} / ${who} は ${expected === null ? '当てはまらない' : JSON.stringify(expected)}`, () => {
+    assert.deepEqual(reasonFact(reason, corner, ps), expected);
+  });
+});
+test('編成のわけ: 9つのわけが、すべて当てはまる例を持っている', () => {
+  const covered = new Set(REASON_CASES.filter(([, , , expected]) => expected !== null).map(([reason]) => reason));
+  assert.deepEqual([...covered].sort(), [...REASONS].sort());
+});
+test('編成のわけ: 当てはまる組がいくつもあるときは、先に出てくる組の値を返す', () => {
+  const ps = [rp(OBA, { card: 'うみ' }), rp(MAGO, { card: 'うみ' }), rp(OKA, { card: 'やま' }), rp(OTO, { card: 'やま' })];
+  assert.deepEqual(reasonFact(R6, 'ひとこと', ps), { kind: 'card', value: 'うみ' });
+});
+test('編成のわけ: 一覧にない言葉や文字でない値は、どのコーナーでも当てはまらない', () => {
+  for (const reason of ['ほげ', '', 5, null, undefined, {}, [R1]]) {
+    for (const corner of CORNERS) assert.equal(reasonFact(reason, corner, [rp(OBA)]), null, String(reason));
+  }
+});
+
+// ひとこと に3件、つぎ に2件ある番組。ちがう人どうしが、同じお題・同じ札を選んでいる
+const sharePosts = [
+  { id: 'a', who: 'おばあちゃん', topic: 'そら', card: 'はれ', text: 'いい天気だった' },
+  { id: 'b', who: 'まご', topic: 'そら', card: 'はれ' },
+  { id: 'c', who: 'おかあさん', topic: 'ごはん', card: 'おかず' },
+  { id: 'd', who: 'まご', topic: 'どこ行きたい', card: 'こうえん' },
+  { id: 'e', who: 'おばあちゃん', topic: 'どこ行きたい', card: 'こうえん' },
+];
+test('編成のわけ: 条件に合うわけを選んだ番組は通り、合わないわけを選んだ番組は「編成のわけが投稿と合わない」で弾く', () => {
+  const run = (hitokoto, tsugi) => {
+    const plan = { feature: 'かぞくの一言特集', lineup: [L('ひとこと', hitokoto), L('つぎ', tsugi)] };
+    return checkNews(programFor(sharePosts, plan), sharePosts);
+  };
+  const ok = run(R5, R6);
+  assert.equal(ok.ok, true, ok.reason);
+  assert.deepEqual(ok.news.lineup, [L('ひとこと', R5), L('つぎ', R6)]);
+  // 見出しがない／会いたい日がない／コーナーがちがう
+  for (const [hitokoto, tsugi] of [[R7, R6], [R5, R8], [R2, R6], [R5, R1], [R3, R6], [R4, R6]]) {
+    const r = run(hitokoto, tsugi);
+    assert.equal(r.ok, false, `${hitokoto} / ${tsugi}`);
+    assert.equal(r.reason, '編成のわけが投稿と合わない');
+  }
+});
+
+for (const [name, lineup] of [
+  ['配列でない（文字）', 'ひとこと'],
+  ['配列でない（オブジェクト）', L('ひとこと', R1)],
+  ['null', null],
+  ['4件', [...goodLineup(), L('つぎ', R2)]],
+  ['項目が文字', ['ひとこと', L('むかし', R3), L('つぎ', R2)]],
+  ['項目が null', [null, L('むかし', R3), L('つぎ', R2)]],
+  ['一覧にない reason', [L('ひとこと', 'ほげ'), L('むかし', R3), L('つぎ', R2)]],
+  ['文字でない reason', [{ corner: 'ひとこと', reason: 5 }, L('むかし', R3), L('つぎ', R2)]],
+  ['一覧にない corner', [L('へんなコーナー', R1), L('むかし', R3), L('つぎ', R2)]],
+]) {
+  test(`lineup: 弾く（形が違う） - ${name}`, () => {
+    const r = checkNews(planOf(lineup), posts);
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'lineup の形が違う');
+  });
+}
+for (const [name, lineup] of [
+  // 最後のコーナーが足りない例は、件数の検査だけが見つけられる（途中が抜けた例は、コーナーの順の検査でも見つかる）
+  ['足りない（つぎ がない）', [L('ひとこと', R1), L('むかし', R3)]],
+  ['足りない（むかし がない）', [L('ひとこと', R1), L('つぎ', R2)]],
+  ['0件', []],
+  ['順番が逆', [L('つぎ', R2), L('むかし', R3), L('ひとこと', R1)]],
+  ['同じコーナーを2回', [L('ひとこと', R1), L('ひとこと', R1), L('つぎ', R2)]],
+  ['むかし が抜けて つぎ が2回', [L('ひとこと', R1), L('つぎ', R2), L('つぎ', R2)]],
+]) {
+  test(`lineup: 弾く（コーナーが番組と合わない） - ${name}`, () => {
+    const r = checkNews(planOf(lineup), posts);
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'lineup のコーナーが番組と合わない');
+  });
+}
+test('lineup: 番組に出てこないコーナーのわけがあれば弾き、出てくるコーナーだけなら通る', () => {
+  const ps = [tp('a', 'そら'), tp('b', 'なに食べたい')]; // むかし のない番組
+  const withLineup = (lineup) => checkNews(programFor(ps, { feature: 'かぞくの一言特集', lineup }), ps);
+  const ng = withLineup(goodLineup());
+  assert.equal(ng.ok, false);
+  assert.equal(ng.reason, 'lineup のコーナーが番組と合わない');
+  const ok = withLineup([L('ひとこと', R1), L('つぎ', R2)]);
+  assert.equal(ok.ok, true, ok.reason);
+});
+test('lineup: 項目の余計なキーは取り除いて返す', () => {
+  const r = checkNews(planOf(goodLineup().map((x) => ({ ...x, html: '<script>' }))), posts);
+  assert.equal(r.ok, true, r.reason);
+  assert.deepEqual(r.news.lineup, goodLineup());
+});
+
+test('特集名と編成のわけ: 検査中に値を差し替える細工（getter）をしても、検査していない値は返らない', () => {
+  let featureReads = 0;
+  let reasonReads = 0;
+  let cornerReads = 0;
+  const n = planOf(goodLineup());
+  Object.defineProperty(n, 'feature', { get: () => (++featureReads === 1 ? 'かぞくの一言特集' : '<b>x</b>'), enumerable: true });
+  Object.defineProperty(n.lineup[0], 'reason', { get: () => (++reasonReads === 1 ? R1 : '<b>x</b>'), enumerable: true });
+  Object.defineProperty(n.lineup[1], 'corner', { get: () => (++cornerReads === 1 ? 'むかし' : 'へんなコーナー'), enumerable: true });
+  const r = checkNews(n, posts);
+  assert.equal(r.ok, true, r.reason);
+  assert.equal(r.news.feature, 'かぞくの一言特集');
+  assert.equal(r.news.lineup[0].reason, R1);
+  assert.equal(r.news.lineup[1].corner, 'むかし');
+});
+
+test('編成のわけ: 札の値が __proto__ などでも壊れず、Object.prototype も汚れない', () => {
+  for (const card of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) {
+    assert.deepEqual(reasonFact(R6, 'ひとこと', [rp(OBA, { card }), rp(MAGO, { card })]), { kind: 'card', value: card }, card);
+    // 同じ人が2回選んだだけなら当てはまらない
+    assert.equal(reasonFact(R6, 'ひとこと', [rp(OBA, { card }), rp(OBA, { card })]), null, card);
+    // その札を選んだ人が1人だけなら当てはまらない（Object.prototype の中身を「選ばれた札」と見まちがえない）
+    assert.equal(reasonFact(R6, 'ひとこと', [rp(OBA, { card }), rp(MAGO, { card: 'うみ' })]), null, card);
+  }
+  // 投稿の検査から番組の検査までを通しても同じ
+  const ps = cleanPosts({
+    posts: [
+      { id: 'a', who: 'おばあちゃん', topic: 'そら', card: '__proto__' },
+      { id: 'b', who: 'まご', topic: 'そら', card: '__proto__' },
+    ],
+  }).posts;
+  const r = checkNews(programFor(ps, { feature: 'かぞくの一言特集', lineup: [L('ひとこと', R6)] }), ps);
+  assert.equal(r.ok, true, r.reason);
+  assert.equal({}.polluted, undefined);
+  assert.equal(Object.keys(Object.prototype).length, 0);
+});

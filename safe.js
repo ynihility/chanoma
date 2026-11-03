@@ -370,13 +370,82 @@ function wordProblem(s, ctx) {
 export const isNostalgic = (post) =>
   TODAY_TOPICS.includes(post.topic) && (post.headline === 'なつかしい' || post.card === 'なつかしいもの');
 
+// ---- 今夜の特集名と、コーナーごとの編成のわけ ----
+// どちらも、Claude には「この一覧から選ぶ」ことだけをさせる。選んだものが投稿の事実と合うかは、ここで確かめる。
+// 一覧の言葉はそのまま画面に出る（prompt.txt にも同じ言葉を書いてある。変えるときは両方そろえる）
+
+const countIf = (list, test) => list.filter(test).length;
+
+// 今夜の特集名と、選べる条件。today は今日のことの投稿、next はつぎに会う日の希望の投稿。
+// 数えるのは件数で、同じ人の投稿が2件でも特集になる。見出しの特集は、今日の投稿だけで数える
+const FEATURE_RULES = [
+  ['ごはん特集', (today) => countIf(today, (p) => p.topic === 'ごはん') >= 2],
+  ['そら特集', (today) => countIf(today, (p) => p.topic === 'そら') >= 2],
+  ['したこと特集', (today) => countIf(today, (p) => p.topic === 'したこと') >= 2],
+  ['みつけた特集', (today) => countIf(today, (p) => p.topic === 'みつけた') >= 2],
+  ['うれしかった特集', (today) => countIf(today, (p) => p.headline === 'うれしかった') >= 2],
+  ['おいしかった特集', (today) => countIf(today, (p) => p.headline === 'おいしかった') >= 2],
+  ['びっくり特集', (today) => countIf(today, (p) => p.headline === 'びっくり') >= 2],
+  ['なつかしい特集', (today) => countIf(today, isNostalgic) >= 2],
+  ['つぎに会う日特集', (today, next) => next.length >= 2],
+  // ほかに当てはまるものがないとき用。いつでも選べる
+  ['かぞくの一言特集', () => true],
+];
+export const FEATURES = FEATURE_RULES.map(([name]) => name);
+
+// 選んだ特集名が、投稿の事実と合うか
+function featureFits(feature, posts) {
+  const rule = FEATURE_RULES.find(([name]) => name === feature);
+  if (!rule) return false;
+  const today = posts.filter((p) => TODAY_TOPICS.includes(p.topic));
+  const next = posts.filter((p) => NEXT_TOPICS.includes(p.topic));
+  return rule[1](today, next);
+}
+
+// ちがう人（よびかたがちがう人）どうしが同じ値を選んでいれば、その値を返す。なければ null。
+// 値を覚えるのは Map（札が __proto__ のような文字でも壊れないように）
+function sharedValue(cornerPosts, pick) {
+  const firstWho = new Map();
+  for (const p of cornerPosts) {
+    const value = pick(p);
+    if (!value) continue;
+    if (!firstWho.has(value)) firstWho.set(value, p.who);
+    else if (firstWho.get(value) !== p.who) return value;
+  }
+  return null;
+}
+const fact = (kind, value) => (value ? { kind, value } : null);
+
+// コーナーごとの編成のわけと、選べる条件。corner はコーナー名、posts はそのコーナーに入れた投稿（出てくる順）。
+// 条件に合わなければ null、合えば {}（補足なし）か { kind, value }（画面に出す補足。投稿の言葉そのもの）を返す
+const REASON_RULES = [
+  ['きょうのことを集めました', (corner) => (corner === 'ひとこと' ? {} : null)],
+  ['つぎに会う日の希望を集めました', (corner) => (corner === 'つぎ' ? {} : null)],
+  ['「なつかしい」をえらんだ投稿です', (corner, posts) => (corner === 'むかし' && posts.some(isNostalgic) ? {} : null)],
+  // 本文に書かれているのが本当に昔の話かは、コードでは確かめられない。見るのは「本文がある」ことまで
+  ['むかしの話が書かれています', (corner, posts) => (corner === 'むかし' && posts.some((p) => p.text) ? {} : null)],
+  ['同じお題をえらんだ人がいます', (corner, posts) => fact('topic', sharedValue(posts, (p) => p.topic))],
+  ['同じ札をえらんだ人がいます', (corner, posts) => fact('card', sharedValue(posts, (p) => p.card))],
+  ['同じ見出しをえらんだ人がいます', (corner, posts) => fact('headline', sharedValue(posts, (p) => p.headline))],
+  ['同じ日に会いたい人がいます', (corner, posts) => (corner === 'つぎ' ? fact('wishDate', sharedValue(posts, (p) => p.wishDate)) : null)],
+  ['ちがう人が、かわるがわる出ます', (corner, posts) => (posts.length >= 2 && posts.every((p, i) => i === 0 || p.who !== posts[i - 1].who) ? {} : null)],
+];
+export const REASONS = REASON_RULES.map(([name]) => name);
+
+// 選んだわけが、そのコーナーの投稿の事実と合うか。合わなければ null。
+// 検査と、画面に出す補足の両方でこれを使う（確かめた事実と、画面に出す補足が食い違わないように）
+export function reasonFact(reason, corner, cornerPosts) {
+  const rule = REASON_RULES.find(([name]) => name === reason);
+  return rule ? rule[1](corner, cornerPosts) : null;
+}
+
 // 番組を検査する。posts は cleanPosts を通したもの。
 // 成功なら {ok:true, news}（news は決まった項目だけの新しいオブジェクト）、失敗なら {ok:false, reason}。
 // 検査した値をそのまま返すため、各項目は最初に1回だけ読む
 export function checkNews(news, posts) {
   const bad = (reason) => ({ ok: false, reason });
   if (!Array.isArray(posts) || !news || typeof news !== 'object') return bad('番組の形が違う');
-  const { opening, closing, segments: input } = news;
+  const { opening, closing, segments: input, feature, lineup } = news;
   if (!Array.isArray(input) || input.length > posts.length) return bad('segments の数が違う');
   const ctx = makeContext(posts);
 
@@ -411,5 +480,34 @@ export function checkNews(news, posts) {
     segments.push({ corner, from, host: host.trim() });
   }
   if (used.size !== posts.length) return bad('使われていない投稿がある');
-  return { ok: true, news: { opening: greetings.opening, segments, closing: greetings.closing } };
+
+  // 今夜の特集名と、コーナーごとの編成のわけ。スキーマでは必須なので、本物の返事には必ずある。
+  // ここでは「あれば検査し、なければ無しで通す」（この2つを外しても、番組が動くようにしておくため）。
+  // 理由の文には「」を入れない（server.mjs の頼み方の選び方が、「」の中を取り除くため）
+  const result = { opening: greetings.opening, segments, closing: greetings.closing };
+  if (feature !== undefined) {
+    if (typeof feature !== 'string' || !FEATURES.includes(feature)) return bad('特集名の形が違う');
+    if (!featureFits(feature, posts)) return bad('特集名が投稿と合わない');
+    result.feature = feature;
+  }
+  if (lineup !== undefined) {
+    if (!Array.isArray(lineup) || lineup.length > CORNERS.length) return bad('lineup の形が違う');
+    // 番組に出てくるコーナー（出てくる順、重なりなし）。lineup は、これを1つずつ、同じ順で書いたものでなければならない
+    const corners = [...new Set(segments.map((s) => s.corner))];
+    if (lineup.length !== corners.length) return bad('lineup のコーナーが番組と合わない');
+    const items = [];
+    for (let i = 0; i < lineup.length; i++) {
+      const item = lineup[i];
+      if (!item || typeof item !== 'object') return bad('lineup の形が違う');
+      const { corner, reason } = item;
+      if (!CORNERS.includes(corner) || !REASONS.includes(reason)) return bad('lineup の形が違う');
+      if (corner !== corners[i]) return bad('lineup のコーナーが番組と合わない');
+      // 事実の照合に使うのは、検査ずみの segments（Claude の返事の生の配列ではない）
+      const cornerPosts = segments.filter((s) => s.corner === corner).map((s) => byId.get(s.from));
+      if (!reasonFact(reason, corner, cornerPosts)) return bad('編成のわけが投稿と合わない');
+      items.push({ corner, reason });
+    }
+    result.lineup = items;
+  }
+  return { ok: true, news: result };
 }
