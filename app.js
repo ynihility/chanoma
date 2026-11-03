@@ -797,10 +797,17 @@ async function goEvening() {
     }
     const made = { steps: buildSteps(checked.news, sent, sentDate), sent, sentDate };
     waiting = false;
+    // この番組は、いまの投稿から作ったものか（待っているあいだに投稿やつぎに会う日が変わっていたら、使わない）
+    const current = made.sent === state.posts && made.sentDate === state.nextDate;
     if (!$('tv-view').hidden) {
-      // 待ち画面を見ているので、そのまま番組に切り替える
-      watch(made, true);
-    } else if (made.sent === state.posts && made.sentDate === state.nextDate) {
+      if (current) {
+        // 待ち画面を見ているので、そのまま番組に切り替える
+        watch(made, true);
+      } else {
+        // 古い番組は映さない。待ち画面のまま固まらないよう、やり直せる失敗の画面にする
+        fail('できた番組は、いまの投稿とは別のものでした。');
+      }
+    } else if (current) {
       // 待っているあいだに「投稿にもどる」を押していたら、勝手にテレビへは戻さない。できたことだけ知らせる
       ready = made;
       play('next');
