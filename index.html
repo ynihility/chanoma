@@ -915,6 +915,8 @@
     }
     body.night::before { opacity: 1; }
     body.night #tv-view { position: relative; z-index: 3; }
+    /* ヘッダーの「音を消す」は、部屋の暗さ（上の z-index: 2 の幕）の上に出して、夜でもはっきり読めるようにする */
+    body.night #sound { position: relative; z-index: 3; }
     body.night .tv { filter: drop-shadow(0 0 36px rgba(191, 232, 208, 0.45)); }
 
     /* よびかたの変更は、ふだんは畳んでおく（投稿欄を上に近づけるため） */
