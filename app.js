@@ -307,6 +307,12 @@ function renderRoles() {
 function renameRole() {
   const name = $('rename').value.trim();
   const old = role;
+  // 字数が上限をこえているあいだは変えない。入力した文字は消さず、何字多いかを伝える
+  if (overBy('rename') > 0) {
+    play('error');
+    say(`よびかたが ${overBy('rename')}字 多いので、かえられません。けずってから、もう一度「なまえをかえる」を押してください。`);
+    return;
+  }
   if (name === old) {
     $('rename').value = old;
     showCount('rename');
@@ -453,6 +459,14 @@ const newId = () => `p${Math.random().toString(36).slice(2, 10)}${Date.now().toS
 
 function submitPost() {
   cancelVoice();
+  // 字数が上限をこえているあいだは送らない。入力欄の文字は消さず、何字多いかを伝える
+  // （入力欄の maxlength で黙って切ると、変換で確定した語が途中で切れるため、入力はそのまま受けている）
+  const tooLong = ['nick', 'text'].filter((id) => overBy(id) > 0).map((id) => `${LIMITS[id].label}が ${overBy(id)}字`);
+  if (tooLong.length > 0) {
+    play('error');
+    say(`${tooLong.join('、')} 多いので、送れません。けずってから、もう一度おくってください。`);
+    return;
+  }
   const askDate = pick.topic === WISH_DATE_TOPIC;
   const wishDate = askDate ? $('wish-date').value : '';
   if (!pick.topic || (askDate ? !wishDate : !pick.card)) {
