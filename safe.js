@@ -322,7 +322,8 @@ function makeContext(posts) {
     quotes: posts.map((p) => quoteForm(p.text ?? '')).filter((t) => t.length >= QUOTE_MIN),
   };
 }
-const quoteForm = (s) => fold(s).replace(/[\p{P}\p{S}]/gu, '');
+// 本文の写しの照合に使う形。ひらがなに直し、記号と、絵文字をつなぐ U+200D を除く（本文のつないだ絵文字だけを抜いて写した文も、写しとして見つけるため）
+const quoteForm = (s) => fold(s).replace(/[\p{P}\p{S}\u200D]/gu, '');
 
 // 1つの文を検査し、問題があれば理由を、なければ null を返す
 function wordProblem(s, ctx) {

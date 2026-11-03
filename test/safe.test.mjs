@@ -1037,3 +1037,27 @@ for (const [label, before, after, reason] of [
     assert.match(r.reason, reason);
   });
 }
+
+// ---- 本文につないだ絵文字がある投稿で、絵文字だけを抜いて本文を写した文を見逃さない ----
+// 本文の写しの照合では、記号と同じように U+200D も除いて比べる
+const BODY_TAIL = 'で煮物を作った';
+// 本文が text の投稿 1 件（投稿の検査を通したもの）を、司会の文 host で呼ぶ番組を検査する
+const callWithText = (text, host) => {
+  const cleaned = cleanPosts({ posts: [{ id: 'a', who: 'まご', topic: 'そら', text }] });
+  assert.equal(cleaned.ok, true, cleaned.error);
+  const news = { opening: 'こんばんは。', segments: [{ corner: 'ひとこと', from: 'a', host }], closing: 'おやすみなさい。' };
+  return checkNews(news, cleaned.posts);
+};
+for (const [label, mark] of [['つないだ絵文字（家族の絵文字）', FAMILY3], ['つなぎのない絵文字', emoji(0x1F600)]]) {
+  test(`弾く(本文の写し): 本文に${label}があっても、絵文字だけを抜いて本文を写した文は「投稿の本文を写している」で弾く`, () => {
+    const r = callWithText('きょうは' + mark + BODY_TAIL, 'きょうは' + BODY_TAIL + 'の話です。');
+    assert.equal(r.ok, false, '通ってしまった');
+    assert.match(r.reason, /投稿の本文を写している/);
+  });
+}
+test('通す(本文の写し): 本文につないだ絵文字がある投稿でも、本文を写さない司会の文は通る', () => {
+  for (const host of ['次のお話です。', 'まごさんのひとことです。']) {
+    const r = callWithText('きょうは' + FAMILY3 + BODY_TAIL, host);
+    assert.equal(r.ok, true, `${host}: ${r.reason}`);
+  }
+});
