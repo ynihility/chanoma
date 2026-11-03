@@ -66,7 +66,7 @@
       min-height: 100vh;
       color: var(--ink);
       font-family: var(--font-body);
-      font-size: 20px;
+      font-size: 24px;
       line-height: 1.7;
       /* 畳。い草の細い目と、画面の左右の畳の縁（へり）を CSS だけで描く。文字はこの上に直接置かない */
       background:
@@ -149,6 +149,8 @@
       position: relative;
       font: inherit;
       font-weight: 700;
+      /* 行の高さは本文（1.7）より詰める。24px の文字でも、ボタンの高さが 56px のまま増えないように */
+      line-height: 1.4;
       min-height: 56px;
       padding: var(--gap-2) var(--gap-4);
       color: var(--ink);
@@ -227,7 +229,7 @@
     #evening {
       min-height: 72px;
       padding: var(--gap-2) var(--gap-5) var(--gap-2) 68px;
-      font-size: 22px;
+      font-size: 24px;
       letter-spacing: 0.05em;
       color: var(--ink);
       background: var(--paper);
@@ -303,7 +305,7 @@
     }
     /* 見出しの下の、新聞のような二重線 */
     #post-title, #list-title { padding-bottom: var(--gap-1); border-bottom: 5px double var(--ink); }
-    .label { font-weight: 700; font-size: 21px; margin: var(--gap-5) 0 var(--gap-2); }
+    .label { font-weight: 700; font-size: 24px; margin: var(--gap-5) 0 var(--gap-2); }
     /* ラベルの頭の小さな山吹の四角（飾り。文字とは重ならない） */
     .label::before {
       content: "";
@@ -315,7 +317,7 @@
       background: var(--yamabuki);
       border: 2px solid var(--ink);
     }
-    .note { font-size: 20px; color: var(--shade); margin: var(--gap-2) 0; }
+    .note { font-size: 24px; color: var(--shade); margin: var(--gap-2) 0; }
     .msg { min-height: 1.7em; margin: var(--gap-3) 0 0; font-weight: 700; color: var(--shu-text); }
     /* 注記や案内の文は、対応しているブラウザでは文節のところで改行する（「ブ／ラウザ」のように語の途中で割れにくくなる） */
     .note, .msg, .label, summary { word-break: auto-phrase; }
@@ -841,8 +843,14 @@
 
     /* ===== 狭い画面（スマホ・小さいタブレット） ===== */
     @media (max-width: 640px) {
+      /* ヘッダー: 上の段に題字と「音を消す」、つぎの段によびかた、いちばん下に「夜7時にする」を並べる。
+         文字を 24px にしても、ヘッダーが高くなりすぎないようにするため */
       header { padding: var(--gap-3) var(--gap-3) var(--gap-4); }
-      h1 { font-size: 32px; }
+      h1 { order: 1; margin-right: 0; font-size: 28px; letter-spacing: 0.12em; }
+      .spacer { display: none; }
+      #sound { order: 2; margin-left: auto; }
+      #roles { order: 3; flex-basis: 100%; gap: var(--gap-2); margin-bottom: 0; }
+      #evening { order: 4; }
       .shoji { min-height: 60px; padding: var(--gap-1) var(--gap-3) 0; }
       main { padding: var(--gap-5) var(--gap-3) 56px; }
       .panel { border-width: 8px; padding: var(--gap-4); }
@@ -981,7 +989,7 @@
     <section id="date-view" class="panel" aria-labelledby="date-title">
       <div class="rings" aria-hidden="true"><span></span><span></span></div>
       <h2 id="date-title">つぎに会う日</h2>
-      <p class="note">日にちが決まっていれば、えらんでください（決まっていなくてもよい）。それぞれの「会いたい日」の希望は、上の「つぎに会う日の希望」から送れます。</p>
+      <p class="note">日にちが決まっていれば、えらんでください（決まっていなくてもよい）。それぞれの「<span class="nw">会いたい日</span>」の希望は、上の「<span class="nw">つぎに会う日の希望</span>」から送れます。</p>
       <input id="next-date" type="date" aria-labelledby="date-title">
     </section>
 
