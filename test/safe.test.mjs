@@ -910,3 +910,56 @@ test('見えない文字: つないだ絵文字のあとでも、打ったまま
 test('見えない文字: 長さの上限の文は今までどおり（何文字目は付けない）', () => {
   assert.equal(cleanPosts(one({ text: 'あ'.repeat(201) })).error, 'ひとことは200文字以内の文字で入力してください。');
 });
+
+// ---- よびかた・ニックネームに記号があるとき、司会が名前を呼んだだけの文は弾かない ----
+// 投稿にある名前そのものは、記号の検査から外す。名前のほかの記号（投稿にないもの）は、今までどおり弾く
+const TILDE = String.fromCodePoint(0xFF5E); // 全角チルダ（NFKC で半角の ~ に変わる記号）
+const GRANDMA_EMOJI = String.fromCodePoint(0x1F475);
+// people（よびかたの文字列、または { who, name }）の人たちの投稿を、hosts の文でそれぞれ呼ぶ番組を検査する
+const callPeople = (people, hosts) => {
+  const ps = people.map((p, i) => ({ id: `p${i}`, topic: 'そら', ...(typeof p === 'string' ? { who: p } : p) }));
+  const segments = ps.map((p, i) => ({ corner: 'ひとこと', from: p.id, host: hosts[i] }));
+  return checkNews({ opening: 'こんばんは。', segments, closing: 'おやすみなさい。' }, ps);
+};
+for (const [label, people, hosts] of [
+  ['よびかた「ばあば♪」', ['ばあば♪'], ['ばあば♪のひとことです。']],
+  ['よびかた「Baba_1」', ['Baba_1'], ['Baba_1のお話です。']],
+  ['よびかた「ばあば～」（全角チルダ U+FF5E）', ['ばあば' + TILDE], ['ばあば' + TILDE + 'のお話です。']],
+  ['カタカナのよびかた「ママ♪」', ['ママ♪'], ['ママ♪のお話です。']],
+  ['ニックネーム「ゆき♪」', [{ who: 'まご', name: 'ゆき♪' }], ['ゆき♪のひとことです。']],
+  ['絵文字のニックネーム', [{ who: 'ばあば', name: GRANDMA_EMOJI }], [GRANDMA_EMOJI + 'のひとことです。']],
+  ['名前が文に2回', ['ばあば♪'], ['ばあば♪とばあば♪のお話です。']],
+  // 全角で打った名前を、半角で呼んでも通る（検査で使う形にそろえた形でも探す）
+  ['全角で打った「ＡＢＣ♪」を半角で呼ぶ', ['ＡＢＣ♪'], ['ABC♪のお話です。']],
+  // 「ばあば」と「ばあば♪」がいるときは、長い名前から取り除く。短い名前を先に消すと「♪」だけが残って弾かれる
+  ['「ばあば」と「ばあば♪」の2人', ['ばあば', 'ばあば♪'], ['ばあばのお話です。', 'ばあば♪のお話です。']],
+]) {
+  test(`通す(記号入りの名前): ${label}`, () => {
+    const r = callPeople(people, hosts);
+    assert.equal(r.ok, true, r.reason);
+  });
+}
+for (const [label, people, hosts] of [
+  ['投稿にない♪を足した（よびかたは「ばあば」）', ['ばあば'], ['ばあば♪のひとことです。']],
+  ['司会が <b> で囲んだ', ['ばあば'], ['<b>ばあば</b>']],
+  ['名前のあとに、投稿にない★を足した', ['ばあば♪'], ['ばあば♪★のひとことです。']],
+  ['名前のあとに、♪をもう1つ足した', ['ばあば♪'], ['ばあば♪♪のひとことです。']],
+  ['名前のあとに、投稿にない # を足した', ['Baba_1'], ['Baba_1#のお話です。']],
+  ['別の人の名前に、投稿にない♪を付けた', ['ばあば♪', 'じいじ'], ['ばあば♪とじいじ♪のお話です。', '次の話です。']],
+  ['名前のあとに URL を足した', ['ばあば♪'], ['ばあば♪ https://example.com']],
+]) {
+  test(`弾く(記号入りの名前): ${label}`, () => {
+    const r = callPeople(people, hosts);
+    assert.equal(r.ok, false, '通ってしまった');
+    assert.match(r.reason, /記号/);
+  });
+}
+test('記号入りの名前: 名前に禁止語が入っていても、ほかの検査は今までどおり名前を含めて当てる', () => {
+  // 外すのは記号の検査だけ。健康・順位の検査には、名前を含んだ文をそのまま当てる
+  const health = callPeople(['健康♪'], ['健康♪のお話です。']);
+  assert.equal(health.ok, false);
+  assert.match(health.reason, /健康や孤独/);
+  const rank = callPeople(['ベスト♪'], ['ベスト♪のお話です。']);
+  assert.equal(rank.ok, false);
+  assert.match(rank.reason, /順位/);
+});

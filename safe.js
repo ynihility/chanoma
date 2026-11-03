@@ -309,6 +309,12 @@ function makeContext(posts) {
     known: strings.map(norm).join('\n'),
     persons,
     names,
+    // 記号の検査（MARKUP）の前に、文から取り除く投稿の名前（よびかた・ニックネーム）。
+    // 打ったままの形と、norm でそろえた形の両方を、長いものから順に並べる。
+    // 短い名前を先に消すと、長い名前の記号だけが文に残る（「ばあば」と「ばあば♪」がいる投稿など）ため
+    nameForms: [...new Set(posts.flatMap((p) => [p.who, p.name]).filter(Boolean).flatMap((t) => [t, norm(t)]))]
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length),
     // 本文の写しを探すために、ひらがなに直して記号を除いた本文
     quotes: posts.map((p) => quoteForm(p.text ?? '')).filter((t) => t.length >= QUOTE_MIN),
   };
@@ -322,7 +328,10 @@ function wordProblem(s, ctx) {
   const f = fold(s);
   // 区切りの記号や結合文字を除いた形。禁止語の検査はこちらに当てる
   const g = f.replace(SPLITTERS, '');
-  if (MARKUP.test(n)) return 'HTMLや記号、URL、絵文字が混ざっている';
+  // 記号の検査にだけ、投稿の名前そのものを取り除いた文を当てる。名前に記号が入っていても（ばあば♪、Baba_1 など）、
+  // 司会が名前を呼んだだけの文を弾かないため。名前のほかの記号（投稿にない♪や <b> など）は、今までどおり弾く。
+  // 健康・助言・催促・順位などのほかの検査は、名前を含んだまま当てる（名前に禁止語が入っていても、そちらは変えない）
+  if (MARKUP.test(removeAll(n, ctx.nameForms))) return 'HTMLや記号、URL、絵文字が混ざっている';
   const rank = removeAll(g, RANK_BENIGN);
   if (RANK_WORDS.some((w) => rank.includes(w)) || RANK_PATTERN.test(rank)) return '順位づけや比べる言葉がある';
   const health = removeAll(g, HEALTH_BENIGN);
