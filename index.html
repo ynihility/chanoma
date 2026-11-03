@@ -854,7 +854,8 @@
       .shoji { min-height: 60px; padding: var(--gap-1) var(--gap-3) 0; }
       main { padding: var(--gap-5) var(--gap-3) 56px; }
       .panel { border-width: 8px; padding: var(--gap-4); }
-      .tv { grid-template-columns: 1fr; padding: var(--gap-3); }
+      /* 中身を縦に並べる。下の帯（.row）を、画面の下にくっつけて動かせるようにするため */
+      .tv { display: flex; flex-direction: column; padding: var(--gap-3); }
       .tv-dials { width: auto; flex-direction: row; justify-content: center; padding: var(--gap-2); }
       .speaker { flex: none; width: 80px; min-height: 40px; }
       .screen { min-height: 300px; padding: var(--gap-5) var(--gap-4); border-radius: 32px / 26px; }
@@ -872,8 +873,28 @@
       .screen .host-row .sprite { align-self: flex-start; }
       .screen .host::before { top: -28px; left: 36px; border-width: 12px; border-right-color: transparent; border-bottom-color: var(--crt-light); }
       .screen .host::after { top: -20px; left: 38px; border-width: 10px; border-right-color: transparent; border-bottom-color: #1F4538; }
-      /* 「つぎへ」が画面の外に出ないよう、下に固定する */
-      .tv > .row { position: sticky; bottom: var(--gap-3); z-index: 5; }
+      /* 「つぎへ」「投稿にもどる」の帯。いつでも押せるよう、画面の下にくっつける。
+         本文が透けて読みにくくならないよう、地は不透明にする。くっつくときも、帯の本来の場所（テレビのいちばん下）は
+         あいたまま残るので、そこまで進めば、帯が本文にかぶらず、すべての文を読める */
+      .tv > .row {
+        position: sticky;
+        bottom: var(--gap-2);
+        z-index: 5;
+        gap: var(--gap-2);
+        padding: var(--gap-2);
+        background: var(--shade);
+        border: 3px solid var(--ink);
+        border-radius: 16px;
+        box-shadow: inset 0 0 0 2px var(--wood-light), 0 4px 0 var(--ink);
+      }
+      /* 帯の中のボタンは、狭い幅でも2つが1段に並ぶよう、横の余白と字間を詰めて、余った幅を分け合う */
+      .tv > .row button { flex: 1 1 auto; min-width: 0; padding-left: var(--gap-3); padding-right: var(--gap-3); }
+      .tv > .row button.primary { letter-spacing: 0.05em; }
+      /* 夜7時のあいだは、上の部屋をたたんで、テレビを最初の画面に入れる。障子（飾り）とよびかたのボタンは隠し、
+         ヘッダーは題字と「音を消す」だけの細い帯にする */
+      body.night .shoji, body.night #roles { display: none; }
+      body.night header { padding: var(--gap-2) var(--gap-3); border-bottom-width: 4px; }
+      body.night main { padding-top: var(--gap-3); }
       /* 投稿の短冊: 絵と本文を1行目に、「消す」は次の行の右へ */
       ul.posts li { flex-wrap: wrap; }
       ul.posts .body { flex-basis: calc(100% - 72px); }
