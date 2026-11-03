@@ -147,6 +147,42 @@ function save() {
 
 // ---- 投稿画面 ----
 
+// ---- 文字数の表示（ひとこと・ニックネーム・よびかた）----
+
+// 数え方は、サーバーの検査（safe.js の optionalText）と同じ .length（UTF-16 の数。絵文字は2字に数える）。
+// 数え方を変えるときは、ここだけ直す
+const countOf = (text) => text.length;
+
+// 入力欄ごとの上限と、数える文字列。上限は safe.js の検査と同じ（ひとこと200・ニックネーム20・よびかた20）。
+// ひとこと・ニックネームは打ったまま、よびかたは前後の空白をのぞいた形で数える（送るときの形と同じ）。
+// advice は、上限をこえたときに添える一言
+const LIMITS = {
+  text: { max: 200, label: 'ひとこと', read: () => $('text').value, advice: 'けずってから送ってください。' },
+  nick: { max: 20, label: 'ニックネーム', read: () => $('nick').value, advice: 'けずってから送ってください。' },
+  rename: { max: 20, label: 'よびかた', read: () => $('rename').value.trim(), advice: 'けずってから「なまえをかえる」を押してください。' },
+};
+// 上限をこえている字数（こえていなければ 0）
+const overBy = (id) => Math.max(0, countOf(LIMITS[id].read()) - LIMITS[id].max);
+
+// 入力欄の下の文字数の表示を、いまの入力に合わせる。
+// 残りの数が前と同じときは触らない（読み上げが、同じ案内をくり返さないように）
+function showCount(id) {
+  const box = $(`${id}-count`);
+  const rest = LIMITS[id].max - countOf(LIMITS[id].read());
+  if (box.dataset.rest === String(rest)) return;
+  box.dataset.rest = String(rest);
+  const main = box.querySelector('.count-main');
+  const over = box.querySelector('.count-over');
+  if (rest >= 0) {
+    main.replaceChildren('あと ', el('span', String(rest), 'num'), ' 字');
+    over.replaceChildren();
+  } else {
+    main.replaceChildren();
+    over.replaceChildren(el('span', String(-rest), 'num'), `字 多いです。${LIMITS[id].advice}`);
+  }
+}
+const showCounts = () => Object.keys(LIMITS).forEach(showCount);
+
 // 選ぶボタンの並びを作る。並びが同じなら、ボタンは作り直さず選択の印だけを更新する。
 // 作り直すとキーボードのフォーカスが消えて、押すたびに先頭から Tab をやり直すことになるため
 function renderChoices(containerId, items, current, onPick, emptyText, withIcon = false) {
@@ -213,6 +249,8 @@ function renderForm() {
   if ($('nick').value !== profile().nick) $('nick').value = profile().nick;
   // よびかたの入力欄は、人を切り替えたときに合わせる（入力中は触らない）
   if (document.activeElement !== $('rename') && $('rename').value !== role) $('rename').value = role;
+  // 人を切り替えたときや、送ったあとに入力欄が空になったときも、文字数を合わせる
+  showCounts();
   renderSteps();
 }
 
@@ -271,6 +309,7 @@ function renameRole() {
   const old = role;
   if (name === old) {
     $('rename').value = old;
+    showCount('rename');
     say('');
     return;
   }
@@ -1031,6 +1070,14 @@ $('text').addEventListener('keydown', (e) => {
 $('nick').addEventListener('input', () => {
   profile().nick = $('nick').value;
 });
+// 文字数は、入力のたびに合わせる。変換の途中は数えない（未確定の文字は、確定すると長さが変わるため）ので、
+// 変換が確定したとき（compositionend）に数える。どちらも入力欄の値には触らない（変換の途中で値を書き換えると、変換が壊れるため）
+for (const id of Object.keys(LIMITS)) {
+  $(id).addEventListener('input', (e) => {
+    if (!e.isComposing) showCount(id);
+  });
+  $(id).addEventListener('compositionend', () => showCount(id));
+}
 $('next-date').addEventListener('change', changeDate);
 // 会いたい日をえらんだら、手順の3つめにチェックを付ける
 $('wish-date').addEventListener('input', renderSteps);
@@ -1114,6 +1161,7 @@ $('voice').addEventListener('click', () => {
         // 入力欄の上限（200文字）に収める。改行などはここで取り除く
         const joined = [$('text').value, text].filter(Boolean).join('　').replace(/[\r\n\t]+/g, '');
         $('text').value = joined.slice(0, 200);
+        showCount('text');
         say('文字にしました。まちがいがないか見てから、「おくる」を押してください。');
       },
       onError: (reason) => say(VOICE_ERRORS[reason] ?? '音声を文字にできませんでした。文字で入れてください。'),
