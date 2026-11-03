@@ -365,6 +365,11 @@ function wordProblem(s, ctx) {
   return null;
 }
 
+// 家族が「なつかしい」を選んだ今日の投稿か（見出しが なつかしい、または札が なつかしいもの）。
+// つぎに会う日の希望の投稿は、見出しが なつかしい でも対象にしない。本文に書いてあるだけの投稿も対象にしない（それは Claude の判断）
+export const isNostalgic = (post) =>
+  TODAY_TOPICS.includes(post.topic) && (post.headline === 'なつかしい' || post.card === 'なつかしいもの');
+
 // 番組を検査する。posts は cleanPosts を通したもの。
 // 成功なら {ok:true, news}（news は決まった項目だけの新しいオブジェクト）、失敗なら {ok:false, reason}。
 // 検査した値をそのまま返すため、各項目は最初に1回だけ読む
@@ -398,6 +403,8 @@ export function checkNews(news, posts) {
     lastCorner = cornerIndex;
     // つぎに会う日の希望は「つぎ」コーナーにだけ、今日の投稿はそれ以外にだけ入る
     if (NEXT_TOPICS.includes(post.topic) !== (corner === 'つぎ')) return bad('投稿とコーナーが合わない');
+    // 家族が「なつかしい」を選んだ今日の投稿は、必ず むかし に入る。置き場所の誤りは、つなぎの言葉の検査より先に知らせる
+    if (isNostalgic(post) && corner !== 'むかし') return bad('なつかしいを選んだ今日の投稿が むかし にない');
     if (typeof host !== 'string' || host.trim() === '' || host.length > MAX_HOST_CHARS) return bad('host の長さや型が違う');
     const w = wordProblem(host, ctx);
     if (w) return bad(`host(${from}): ${w}`);

@@ -473,3 +473,65 @@ test('通す(よびかた変更): 名前が別の名前を含んでいても、�
   const r = callAs(['おばあちゃん', '東京のおじいちゃんとおばあちゃん'], ['おばあちゃんのお話です。', '東京のおじいちゃんとおばあちゃんのお話です。']);
   assert.equal(r.ok, true, r.reason);
 });
+
+// ---- 「なつかしい」を選んだ今日の投稿は、必ず むかし に入る ----
+import { isNostalgic } from '../safe.js';
+const NOSTALGIC_REASON = 'なつかしいを選んだ今日の投稿が むかし にない';
+// 番組の中の、ある投稿のコーナーだけを差し替える
+const moveTo = (news, from, corner) => {
+  news.segments.find((s) => s.from === from).corner = corner;
+  return news;
+};
+// p3 を、見出しではなく札 なつかしいもの で「なつかしい」を選んだ投稿に替えた組
+const cardPosts = posts.map((p) =>
+  (p.id === 'p3' ? { id: 'p3', who: 'おかあさん', topic: 'みつけた', card: 'なつかしいもの', text: '古いアルバムを見つけた' } : p));
+
+test('isNostalgic: 見出しが なつかしい か、札が なつかしいもの の今日の投稿だけが当てはまる', () => {
+  assert.equal(isNostalgic({ topic: 'みつけた', headline: 'なつかしい' }), true);
+  assert.equal(isNostalgic({ topic: 'みつけた', card: 'なつかしいもの' }), true);
+  // 希望の投稿は、見出しが なつかしい でも対象外
+  assert.equal(isNostalgic({ topic: 'なに食べたい', headline: 'なつかしい' }), false);
+  // 本文に書いてあるだけの投稿は対象外（それは Claude の判断）
+  assert.equal(isNostalgic({ topic: 'したこと', text: 'なつかしい写真を見た' }), false);
+  // ほかの見出し・ほかの札は対象外
+  assert.equal(isNostalgic({ topic: 'そら', headline: 'びっくり', card: 'はれ' }), false);
+});
+
+test('なつかしい: 見出しが なつかしい の今日の投稿を ひとこと に置いた番組は弾く', () => {
+  const r = checkNews(moveTo(goodNews(), 'p3', 'ひとこと'), posts);
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, NOSTALGIC_REASON);
+});
+
+test('なつかしい: 札が なつかしいもの の今日の投稿を ひとこと に置いた番組は弾く', () => {
+  const r = checkNews(moveTo(goodNews(), 'p3', 'ひとこと'), cardPosts);
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, NOSTALGIC_REASON);
+});
+
+test('なつかしい: 見出しが なつかしい の希望の投稿は、つぎ に置いて通る', () => {
+  const ps = posts.map((p) => (p.id === 'p4' ? { ...p, headline: 'なつかしい' } : p));
+  const r = checkNews(goodNews(), ps);
+  assert.equal(r.ok, true, r.reason);
+});
+
+test('なつかしい: なつかしい の投稿（見出しでも札でも）を むかし に置いた番組は通る', () => {
+  assert.equal(checkNews(goodNews(), posts).ok, true);
+  const r = checkNews(goodNews(), cardPosts);
+  assert.equal(r.ok, true, r.reason);
+});
+
+test('なつかしい: なつかしいを選んでいない、本文のある今日の投稿を むかし に置いても通る（Claude の判断を残す）', () => {
+  const n = goodNews();
+  const [s1, s2, s3, s4] = n.segments;
+  n.segments = [s2, { ...s1, corner: 'むかし' }, s3, s4];
+  const r = checkNews(n, posts);
+  assert.equal(r.ok, true, r.reason);
+  assert.deepEqual(r.news.segments.map((s) => `${s.from}:${s.corner}`), ['p2:ひとこと', 'p1:むかし', 'p3:むかし', 'p4:つぎ']);
+});
+
+test('なつかしい: なつかしい の今日の投稿を つぎ に置くと、先に「投稿とコーナーが合わない」で弾く（理由の優先順）', () => {
+  const r = checkNews(moveTo(goodNews(), 'p3', 'つぎ'), posts);
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, '投稿とコーナーが合わない');
+});
