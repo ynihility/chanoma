@@ -525,6 +525,8 @@
     ul.posts .body { flex: 1; overflow-wrap: anywhere; }
     ul.posts li .sprite { flex: none; }
     ul.posts li button { min-height: 56px; }
+    /* 消した直後の「もとにもどす」の行（数秒だけ出る）。破線の枠と朱の帯で、ふつうの投稿とは見分ける */
+    ul.posts li.undo { background: var(--paper); border-style: dashed; border-left: 10px solid var(--shu); }
 
     /* ===== ブラウン管テレビ ===== */
     /* scroll-margin-top: テレビを画面の先頭へ寄せるとき、アンテナの先が画面の外に切れないようにする余白 */

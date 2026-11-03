@@ -274,6 +274,7 @@ function renameRole() {
     say(checked.error);
     return;
   }
+  dropUndo();
   state = { ...state, roles: checked.roles, posts: state.posts.map((p) => (p.who === old ? { ...p, who: name } : p)) };
   if (profiles[old]) {
     profiles[name] = profiles[old];
@@ -288,15 +289,65 @@ function renameRole() {
   renderPosts();
 }
 
+// 直前に消した投稿（元に戻すための控え）: { post, index, timer }。なければ null。
+// 戻せるのは、直前に消した1件だけ。ほかの操作（送る・名前を変える・ぜんぶ消す・別の投稿を消す）をしたら捨てる
+let undo = null;
+const UNDO_MS = 8000;
+function dropUndo() {
+  if (!undo) return;
+  clearTimeout(undo.timer);
+  undo = null;
+}
+
+// 消した場所に出す「もとにもどす」の行。読み上げでは、ボタンに「だれの投稿を消したか」を添える
+function undoItem() {
+  const li = el('li', undefined, 'undo');
+  const body = el('span', undefined, 'body');
+  body.id = 'undo-text';
+  body.append(nw(undo.post.who), 'の投稿を消しました。');
+  const back = el('button', 'もとにもどす');
+  back.type = 'button';
+  back.setAttribute('aria-describedby', 'undo-text');
+  back.addEventListener('click', () => {
+    play('tap');
+    restorePost();
+  });
+  li.append(body, back);
+  return li;
+}
+
+// 時間が来たら、「もとにもどす」の行を片づける（ボタンにフォーカスがあったときは、見出しへ移す）
+function expireUndo() {
+  const hadFocus = $('posts').querySelector('.undo')?.contains(document.activeElement);
+  undo = null;
+  renderPosts();
+  if (hadFocus) $('list-title').focus({ preventScroll: true });
+}
+
+// 消した投稿を、もとの位置にもどして、保存し直す
+function restorePost() {
+  if (!undo) return;
+  const { post, index } = undo;
+  dropUndo();
+  const posts = [...state.posts];
+  posts.splice(Math.min(index, posts.length), 0, post);
+  state.posts = posts;
+  save();
+  renderPosts();
+  $('list-title').focus({ preventScroll: true });
+}
+
 function renderPosts() {
   const list = $('posts');
   list.replaceChildren();
-  if (state.posts.length === 0) {
+  if (state.posts.length === 0 && !undo) {
     const empty = el('li');
     empty.append(nw('きょうの投稿は、'), nw('ここに'), nw('ならびます。'));
     list.append(empty);
   }
-  for (const p of state.posts) {
+  state.posts.forEach((p, i) => {
+    // 消した投稿の場所に、「もとにもどす」の行を出す
+    if (undo && undo.index === i) list.append(undoItem());
     const li = el('li');
     const body = el('span', undefined, 'body');
     const wish = p.wishDate ? monthDay(p.wishDate) : '';
@@ -308,17 +359,23 @@ function renderPosts() {
     // 「消す」が何件も並ぶので、読み上げでどの投稿か分かるように名前を付ける
     del.setAttribute('aria-label', `${p.who}の「${p.card ?? (p.wishDate ? monthDay(p.wishDate) : p.topic)}」の投稿を消す`);
     del.addEventListener('click', () => {
+      // 押したらすぐ消して保存する。確認の窓は出さず、数秒のあいだ「もとにもどす」を出す
+      dropUndo();
+      const index = state.posts.findIndex((x) => x.id === p.id);
       state.posts = state.posts.filter((x) => x.id !== p.id);
       save();
+      undo = { post: p, index, timer: setTimeout(expireUndo, UNDO_MS) };
       renderPosts();
-      // 消したボタンは無くなるので、フォーカスを見出しに移す
-      $('list-title').focus();
+      // 消したボタンは無くなるので、フォーカスを「もとにもどす」へ移す（画面は動かさない）
+      $('posts').querySelector('.undo button')?.focus({ preventScroll: true });
     });
     // 動物を選んでいれば、左にドット絵を置く（飾りなので読み上げない）
     if (p.animal) li.append(spriteCanvas(p.animal, 3, undefined, { shadow: true }));
     li.append(body, del);
     list.append(li);
-  }
+  });
+  // いちばん後ろの投稿を消したときは、一覧の終わりに出す
+  if (undo && undo.index >= state.posts.length) list.append(undoItem());
   // 投稿が変わったので、できていた番組が使えるかどうかを、ボタンに反映する
   syncEvening();
 }
@@ -378,6 +435,7 @@ function submitPost() {
     say(r.error);
     return;
   }
+  dropUndo();
   state = { posts: r.posts, ...keep() };
   const saved = save();
   play('send');
@@ -770,6 +828,7 @@ $('rename').addEventListener('keydown', (e) => {
 $('clear').addEventListener('click', () => {
   if (state.posts.length === 0) return;
   if (!confirm('きょうの投稿を、ぜんぶ消します。よろしいですか？')) return;
+  dropUndo();
   state = { posts: [], ...keep() };
   save();
   renderPosts();
