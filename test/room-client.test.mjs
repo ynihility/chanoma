@@ -850,15 +850,50 @@ test('本棚: 同じ日付は置き換え、60本を超えたら古いものか�
   assert.ok(client);
 });
 
-test('https でも localhost でもないとき（crypto.subtle がない）: 部屋の機能は止まり、何も送らない', async () => {
+test('https でも localhost でもないとき（crypto.subtle がない）: 鍵の16進64字をそのまま端末 ID にして、部屋に入れる', async () => {
+  const server = fakeServer(({ method, path }) => {
+    if (method === 'POST' && path === '/api/room') return { status: 201, body: { code: CODE } };
+    return okSync();
+  });
+  const { client, storage } = newClient(server, { subtle: null });
+  assert.equal(client.unsupported(), '');
+  assert.deepEqual(await client.create(), { ok: true });
+  assert.equal(client.inRoom(), true);
+  assert.deepEqual(await client.post(goodPost('a1')), { ok: true, queued: false });
+  const sent = server.calls.find((c) => c.path.endsWith('/posts')).body.device;
+  const key = storage.getItem(DEVICE_KEY);
+  assert.match(sent, /^[0-9a-f]{64}$/);
+  assert.equal(sent, key);
+  // 消すときの ID も同じ。ふたたび開いても、同じ鍵（同じ ID）
+  assert.deepEqual(await client.remove('a1'), { ok: true });
+  assert.equal(server.calls.find((c) => c.method === 'DELETE').headers['X-Chanoma-Device'], key);
+  const again = newClient(server, { subtle: null, storage }).client;
+  await again.post(goodPost('a2'));
+  assert.equal(server.calls.filter((c) => c.path.endsWith('/posts')).at(-1).body.device, key);
+  // subtle があるときは、これまでどおり SHA-256（鍵そのものは送らない）
+  const w = newClient(server);
+  await w.client.enter(CODE);
+  await w.client.post(goodPost('a3'));
+  const hashed = server.calls.filter((c) => c.path.endsWith('/posts')).at(-1).body.device;
+  const wKey = w.storage.getItem(DEVICE_KEY);
+  assert.equal(hashed, crypto.createHash('sha256').update(Buffer.from(wKey, 'hex')).digest('hex'));
+  assert.notEqual(hashed, wKey);
+});
+
+test('乱数が使えない環境だけ、部屋の機能は止まり、何も送らない', async () => {
   const server = fakeServer(() => okSync());
-  const { client } = newClient(server, { subtle: null });
-  assert.match(client.unsupported(), /https か localhost/);
-  assert.equal((await client.create()).ok, false);
-  assert.equal((await client.enter(CODE)).ok, false);
-  assert.equal(server.calls.length, 0);
-  const ok = newClient(server).client;
-  assert.equal(ok.unsupported(), '');
+  const noRandom = createRoomClient({ storage: memoryStorage(), fetch: server.fetch, subtle: null, origin: 'https://chanoma.example' });
+  const had = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+  Object.defineProperty(globalThis, 'crypto', { value: undefined, configurable: true });
+  try {
+    assert.match(noRandom.unsupported(), /部屋を使えません/);
+    assert.equal((await noRandom.create()).ok, false);
+    assert.equal((await noRandom.enter(CODE)).ok, false);
+    assert.equal(server.calls.length, 0);
+  } finally {
+    Object.defineProperty(globalThis, 'crypto', had);
+  }
+  assert.equal(newClient(server).client.unsupported(), '');
 });
 
 test('保存が壊れていても、部屋に入っていない状態で始まる', () => {

@@ -209,14 +209,19 @@ export function createRoomClient(env = {}) {
     }
   };
 
-  // 鍵のハッシュは、https か localhost でしか作れない（crypto.subtle）。作れないときは、部屋の機能を止める
-  const unsupported = () => (subtle && typeof subtle.digest === 'function'
+  // 乱数（getRandomValues）は、http でも使える。鍵を作れないときだけ、部屋の機能を止める
+  const unsupported = () => (env.randomValues || typeof g.crypto?.getRandomValues === 'function'
     ? ''
-    : 'この開き方では、部屋を使えません。https か localhost のアドレスで開いてください。');
+    : 'この端末では、部屋を使えません。');
 
+  // サーバーに送る端末の ID。ふつうは鍵の SHA-256。ハッシュ（crypto.subtle）は https か localhost でしか使えないので、
+  // それ以外（LAN の http など）では、乱数32バイトの16進（64字）をそのまま ID にする。サーバーは、64字の不透明な文字として扱うだけ
   let deviceHashPromise = null;
   function deviceHash() {
-    deviceHashPromise ??= hashDeviceKey(loadDeviceKey({ read, write, randomValues }), subtle);
+    deviceHashPromise ??= (async () => {
+      const key = loadDeviceKey({ read, write, randomValues });
+      return subtle && typeof subtle.digest === 'function' ? hashDeviceKey(key, subtle) : key;
+    })();
     return deviceHashPromise;
   }
 
