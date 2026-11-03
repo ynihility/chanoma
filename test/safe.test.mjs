@@ -1209,3 +1209,112 @@ test('checkShelfProgram: 返す理由に、番組の断片は含まれない', (
   assert.equal(r.error.includes('ハンバーグ'), false);
   assert.equal(typeof r.reason, 'string');
 });
+
+// ---- 禁止語のひらがなの読み（判定 A2-03）、札への検査（A2-04）、見た目が空白の字（A2-05） ----
+// 漢字の版は止まっていたが、ひらがなの書き方が通っていた。prompt.txt が「ひらがなを多めに」と頼むので、実際にありうる書き方を止める
+const HIRAGANA_BAD = [
+  'けんこうにいいおはなしです。', 'にんちしょうのよぼうになります。', 'びょういんにいくおはなしです。',
+  'おいしゃさんのおはなしです。', 'こりつしないおはなしです。', 'かいふくするおはなしです。',
+  'わかがえるおはなしです。', 'ゆうしょうしたおはなしです。',
+];
+// 広げすぎて、ふつうの言葉まで止めていないことを確かめる例（足さないと決めた語に当たる言葉）
+const HIRAGANA_OK = [
+  'がっこうからかえったおはなしです。', 'みんなをよぼうというおはなしです。', 'あかいぼうしのおはなしです。',
+  'きれいなしゃしんのおはなしです。', 'じゅんいちくんのおはなしです。', 'こうかおんがなるおはなしです。',
+  'おいしいごはんのおはなしです。', 'こうえんであそんだおはなしです。', 'おかいものにいったおはなしです。',
+  'ゆうがたのそらのおはなしです。', 'いしのうえにすわったおはなしです。', 'ほけんのおはなしです。',
+];
+// 漢字の版が、直す前から止まっていることの確認（ひらがなの版だけが抜けていた、という前提の裏づけ）
+const KANJI_BAD = ['健康にいいおはなしです。', '認知症の予防になります。', '病院にいくおはなしです。', '優勝したおはなしです。'];
+const juniti = posts.map((p) => (p.id === 'p2' ? { ...p, who: 'じゅんいち' } : p));
+
+test('禁止語: 漢字の版は、これまでどおり司会の文で止まる', () => {
+  for (const h of KANJI_BAD) assert.equal(checkNews(withHost(1, h), posts).ok, false, h);
+});
+
+test('禁止語: ひらがなの読みも、司会の文で止まる', () => {
+  for (const h of HIRAGANA_BAD) {
+    const r = checkNews(withHost(1, h), posts);
+    assert.equal(r.ok, false, h);
+    assert.match(r.reason, /host\(p2\)/, h);
+  }
+});
+
+test('禁止語: ふつうのひらがなの言葉は、司会の文で止めない（広げすぎの確認）', () => {
+  for (const h of HIRAGANA_OK) {
+    const r = checkNews(withHost(1, h), juniti);
+    assert.equal(r.ok, true, `${h} ${r.reason ?? ''}`);
+  }
+});
+
+test('禁止語: ひらがなの読みは、投稿の本文でも止まり、ふつうの言葉は通る', () => {
+  // 順位の言葉（ゆうしょう など）は、司会の文だけで止める。投稿の本文は、もとから健康・助言・催促だけを調べる（運動会の「優勝」を家族が書けるように）
+  for (const text of HIRAGANA_BAD.filter((t) => !t.startsWith('ゆうしょう'))) {
+    const r = checkPostWords({ id: 'a', who: 'まご', topic: 'そら', text });
+    assert.equal(r.ok, false, text);
+  }
+  for (const text of HIRAGANA_OK) {
+    assert.deepEqual(checkPostWords({ id: 'a', who: 'まご', topic: 'そら', text }), { ok: true }, text);
+  }
+});
+
+test('禁止語: 足した語のほかの読み（じゅしん・しんさつ・ずいいち・あっとう・ちょうじゅ など）も止まる', () => {
+  // 健康・助言の語は、本文でも司会の文でも止まる
+  for (const text of ['じゅしんしました', 'しんさつをうけた', 'ちょうじゅのひけつ', 'げんきをもらったよ', 'えがおになれた', 'びょうきにきをつけて']) {
+    assert.equal(checkPostWords({ id: 'a', who: 'まご', topic: 'そら', text }).ok, false, text);
+    assert.equal(checkNews(withHost(1, text), posts).ok, false, text);
+  }
+  // 順位の語は司会の文だけで止まる
+  for (const text of ['ずいいちのできでした', 'あっとうされた', 'ゆうしょうした']) {
+    assert.equal(checkNews(withHost(1, text), posts).ok, false, text);
+  }
+});
+
+test('checkPostWords: 札にも検査をかける（本文がなくても、札だけで止まる）', () => {
+  const r = checkPostWords({ id: 'a', who: 'まご', topic: 'そら', card: 'びょうきにきをつけて' });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /健康/);
+  // 本文は通り、札が引っかかる場合も止める（text と card は別々に調べる）
+  assert.equal(checkPostWords({ id: 'a', who: 'まご', topic: 'そら', text: 'はれていた', card: '病院' }).ok, false);
+  // よびかた・ニックネームには掛けない
+  assert.deepEqual(checkPostWords({ id: 'a', who: 'けんこう', name: 'びょういん', topic: 'そら' }), { ok: true });
+});
+
+test('checkPostWords: 画面の既定の札 24 枚は、すべて通る', () => {
+  // app.js 17〜25 行の CARDS の写し（app.js はブラウザ用でテストから読めないため）
+  const cards = [
+    'ごはん', 'パン', 'めん', 'おかず', 'おやつ', 'のみもの', 'はれ', 'くもり', 'あめ', 'ゆき', 'かぜ', 'おつきさま',
+    'さんぽ', 'おそうじ', 'かいもの', 'おしゃべり', 'おりょうり', 'おひるね', 'はな', 'とり', 'むし', 'あたらしいおみせ',
+    'おもしろいもの', 'なつかしいもの', 'おさんぽ', 'おはなし', 'おかいもの', 'おでかけ', 'ゆっくりする',
+    'こうえん', 'うみ', 'やま', 'おんせん', 'おまつり', 'おうち', 'おすし', 'おにく', 'おさかな', 'おかし', 'なべ',
+  ];
+  for (const card of cards) assert.deepEqual(checkPostWords({ id: 'a', who: 'まご', topic: 'そら', card }), { ok: true }, card);
+});
+
+test('checkShelfProgram: 札に禁止語がある投稿は、本棚にも入れない', () => {
+  const input = shelfProgram();
+  input.posts[3].card = 'びょうきにきをつけて';
+  const r = checkShelfProgram(input);
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /健康/);
+});
+
+test('見た目が空白の字: U+3164・U+115F・U+1160・U+2800・U+034F は、よびかたや本文に入れられない', () => {
+  for (const ch of ['\u3164', '\u115F', '\u1160', '\u2800', '\u034F']) {
+    assert.equal(cleanPost({ id: 'a', who: ch, topic: 'そら' }).ok, false, `who ${ch.codePointAt(0).toString(16)}`);
+    assert.equal(cleanPost({ id: 'a', who: ch + ch, topic: 'そら' }).ok, false);
+    assert.equal(cleanPost({ id: 'a', who: 'まご', name: `ね${ch}こ`, topic: 'そら' }).ok, false);
+    assert.equal(cleanPost({ id: 'a', who: 'まご', topic: 'そら', text: `き${ch}ょう` }).ok, false);
+    assert.equal(cleanPosts({ posts: [{ id: 'a', who: ch, topic: 'そら' }] }).ok, false);
+  }
+  assert.equal(cleanPost({ id: 'a', who: '\u3164', topic: 'そら' }).ok, false);
+  assert.equal(cleanPost({ id: 'a', who: '\u2800\u2800', topic: 'そら' }).ok, false);
+});
+
+test('見た目が空白の字: 司会の文に混ざっていたら止まる', () => {
+  for (const ch of ['\u3164', '\u115F', '\u1160', '\u2800', '\u034F']) {
+    const r = checkNews(withHost(1, `つぎ${ch}のひとこと`), posts);
+    assert.equal(r.ok, false, ch.codePointAt(0).toString(16));
+    assert.match(r.reason, /見えない文字/);
+  }
+});
