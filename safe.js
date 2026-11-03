@@ -19,6 +19,10 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 // 改行や制御文字は、1行のひとことには要らないので入れさせない
 // ゼロ幅文字や文字の向きを変える文字も、見えないまま紛れ込むので同じく入れさせない
 const CONTROL_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+// ただし、絵文字と絵文字をつなぐ U+200D（家族・料理人・白髪の人・虹の旗・白熊などの絵文字に使われる）だけは許す。
+// 前が絵文字（肌色や U+FE0F がついていてもよい）で、後ろも絵文字（髪の部品 U+1F9B0〜1F9B3 を含む）のときだけ。
+// 文字の間や、前後どちらかが絵文字でない U+200D は、今までどおり弾く
+const EMOJI_JOINER = /(?<=\p{Extended_Pictographic}[\uFE0F\u{1F3FB}-\u{1F3FF}]?)\u200D(?=\p{Extended_Pictographic}|[\u{1F9B0}-\u{1F9B3}])/gu;
 const MAX_STATE_CHARS = 64 * 1024;
 
 // 項目の検査に失敗したことを知らせる例外。message は画面に出してよい文だけにする
@@ -27,10 +31,19 @@ const fail = (message) => {
   throw new Invalid(message);
 };
 
+// 見えない文字や改行が最初に出てくる位置を、1から数えた文字数で返す（なければ 0）。
+// 数え方は、打ったままの文字列を Array.from で1字ずつに分けた番目（絵文字は1字、つなぎの U+200D も1字に数える）。
+// 絵文字をつなぐ U+200D は、検査に当てる写しの上でだけ、同じ長さの別の字に置き換える（元の文字列は変えない。数もずれない）
+function invisibleAt(value) {
+  const probe = value.replace(EMOJI_JOINER, '-');
+  return Array.from(probe).findIndex((ch) => CONTROL_CHARS.test(ch)) + 1;
+}
+
 function optionalText(value, max, label) {
   if (value === undefined || value === null || value === '') return undefined;
   if (typeof value !== 'string' || value.length > max) fail(`${label}は${max}文字以内の文字で入力してください。`);
-  if (CONTROL_CHARS.test(value)) fail(`${label}に、改行や見えない文字は使えません。`);
+  const at = invisibleAt(value);
+  if (at > 0) fail(`${label}の ${at} 文字目に、見えない文字か改行が入っています。消してから送ってください。`);
   return value.trim() || undefined;
 }
 

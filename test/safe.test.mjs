@@ -826,3 +826,87 @@ test('編成のわけ: 札の値が __proto__ などでも壊れず、Object.pro
   assert.equal({}.polluted, undefined);
   assert.equal(Object.keys(Object.prototype).length, 0);
 });
+
+// ---- 絵文字をつなぐ U+200D は通し、見えない文字は「何文字目か」を伝えて弾く ----
+const ZWJ = '\u200D';
+// コードポイントの並びから絵文字を組み立てる。つなぎの U+200D は見えないので、ソースには直接書かない
+const emoji = (...codePoints) => codePoints.map((c) => String.fromCodePoint(c)).join('');
+const joined = (...codePoints) => codePoints.map((c) => String.fromCodePoint(c)).join(ZWJ);
+const EMOJI_OK = [
+  // U+200D でつないだ絵文字（これまでは「見えない文字」として弾かれていた）
+  ['家族', joined(0x1F468, 0x1F469, 0x1F467, 0x1F466)],
+  ['料理人', joined(0x1F9D1, 0x1F373)],
+  ['白髪の人', joined(0x1F469, 0x1F9B3)],
+  ['虹の旗（U+FE0F つき）', emoji(0x1F3F3, 0xFE0F) + ZWJ + emoji(0x1F308)],
+  ['白熊（U+FE0F つき）', emoji(0x1F43B) + ZWJ + emoji(0x2744, 0xFE0F)],
+  ['肌色つきの家族', emoji(0x1F468, 0x1F3FB) + ZWJ + emoji(0x1F469, 0x1F3FD) + ZWJ + emoji(0x1F467, 0x1F3FF)],
+  // つなぎのない絵文字（これまでも通っていて、これからも通る）
+  ['肌色つき', emoji(0x1F44D, 0x1F3FD)],
+  ['国旗', emoji(0x1F1EF, 0x1F1F5)],
+  ['赤いハート（U+FE0F つき）', emoji(0x2764, 0xFE0F)],
+  ['キーキャップの 1（U+FE0F と U+20E3 つき）', emoji(0x31, 0xFE0F, 0x20E3)],
+];
+for (const [label, value] of EMOJI_OK) {
+  test(`絵文字: 通す（${label}）- ひとこと・ニックネーム・よびかた・よびかたの変更。文字列は変わらない`, () => {
+    const r = cleanPosts({ posts: [{ id: 'a', who: value, name: value, topic: 'そら', text: `きょうは${value}を見た` }] });
+    assert.equal(r.ok, true, r.error);
+    assert.deepEqual([r.posts[0].who, r.posts[0].name, r.posts[0].text], [value, value, `きょうは${value}を見た`]);
+    const roles = cleanRoles([value, 'a', 'b', 'c', 'd']);
+    assert.equal(roles.ok, true, roles.error);
+    assert.equal(roles.roles[0], value);
+  });
+}
+test('絵文字: つなぎの U+200D が入った投稿は、保存して読み戻せる', () => {
+  const [, family] = EMOJI_OK[0];
+  const clean = cleanPosts({ posts: [{ id: 'a', who: 'まご', name: family, topic: 'そら', text: family }] });
+  const s = loadState(serializeState(clean.posts));
+  assert.equal(s.posts[0].name, family);
+  assert.equal(s.posts[0].text, family);
+});
+
+for (const [label, value] of [
+  ['ZWSP（U+200B）', 'あ\u200Bい'],
+  ['ZWNJ（U+200C）', 'あ\u200Cい'],
+  ['向きを変える文字（U+202E）', 'あ\u202Eい'],
+  ['BOM（U+FEFF）', '\uFEFFあい'],
+  ['タブ', 'あ\tい'],
+  ['改行', 'あ\nい'],
+  ['文字の間の U+200D', `あ${ZWJ}い`],
+  ['英字の間の U+200D', `a${ZWJ}b`],
+  ['文字と絵文字の間の U+200D（前が文字）', `あ${ZWJ}${emoji(0x1F600)}`],
+  ['絵文字と文字の間の U+200D（後ろが文字）', `${emoji(0x1F600)}${ZWJ}あ`],
+  ['絵文字のあとの U+200D だけ', `${emoji(0x1F600)}${ZWJ}`],
+  ['先頭の U+200D', `${ZWJ}${emoji(0x1F600)}`],
+  ['U+200D が2つ続く', `${emoji(0x1F600)}${ZWJ}${ZWJ}${emoji(0x1F600)}`],
+  ['つないだ絵文字のあとの ZWSP', `${joined(0x1F468, 0x1F469)}\u200B`],
+]) {
+  test(`絵文字: 弾く（${label}）- ひとこと・ニックネーム・よびかた・よびかたの変更`, () => {
+    for (const field of ['text', 'name', 'who']) {
+      assert.equal(cleanPosts(one({ [field]: value })).ok, false, `${field} が通ってしまった`);
+    }
+    assert.equal(cleanRoles([value, 'a', 'b', 'c', 'd']).ok, false, 'cleanRoles が通ってしまった');
+  });
+}
+
+test('見えない文字: 何文字目に入っているかを、決まった文で伝える', () => {
+  const tail = '見えない文字か改行が入っています。消してから送ってください。';
+  assert.equal(cleanPosts(one({ text: 'あいうえ\u200Bお' })).error, `ひとことの 5 文字目に、${tail}`);
+  assert.equal(cleanPosts(one({ name: 'ab\u202Ec' })).error, `ニックネームの 3 文字目に、${tail}`);
+  assert.equal(cleanPosts(one({ who: '\uFEFFまご' })).error, `よびかたの 1 文字目に、${tail}`);
+  assert.equal(cleanRoles(['ばあ\u200Bば', 'a', 'b', 'c', 'd']).error, `よびかたの 3 文字目に、${tail}`);
+});
+test('見えない文字: 改行は何文字目かを伝え、見つけた最初の所だけを言う', () => {
+  assert.match(cleanPosts(one({ text: '1行目\n2行目' })).error, /^ひとことの 4 文字目に、/);
+  assert.match(cleanPosts(one({ text: 'あ\u200Bい\u200Bう' })).error, /^ひとことの 2 文字目に、/);
+});
+test('見えない文字: 数えるのは1字ずつ（絵文字は1字）。UTF-16 の長さの数え方にはしない', () => {
+  // 😀 は UTF-16 では2つ分だが、1字と数えて 2 文字目
+  assert.match(cleanPosts(one({ text: `${emoji(0x1F600)}\u200B` })).error, /^ひとことの 2 文字目に、/);
+});
+test('見えない文字: つないだ絵文字のあとでも、打ったままの文字列の何番目かを伝える（つなぎの U+200D も1字に数える）', () => {
+  // 👨 U+200D 👩 の3字のあとなので 4 文字目
+  assert.match(cleanPosts(one({ text: `${joined(0x1F468, 0x1F469)}\u200B` })).error, /^ひとことの 4 文字目に、/);
+});
+test('見えない文字: 長さの上限の文は今までどおり（何文字目は付けない）', () => {
+  assert.equal(cleanPosts(one({ text: 'あ'.repeat(201) })).error, 'ひとことは200文字以内の文字で入力してください。');
+});
