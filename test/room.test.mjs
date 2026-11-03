@@ -707,6 +707,42 @@ const yesterdayShelf = await call('GET', `/api/room/${roomR}/shelf?dates=2026-11
 check('翌朝: 前の日の番組は、本棚として取れる', yesterdayShelf.json?.programs?.length === 1 && yesterdayShelf.json.programs[0].date === '2026-11-04', yesterdayShelf.text);
 await stopApp(app);
 
+// 4-1b. 部屋ごとの番組づくりの試行は、1日3回まで（失敗も数える）。日付の鍵が変われば数え直す
+app = startApp({
+  CHANOMA_FAKE_NOW: '2026-11-04T17:30:00Z', CHANOMA_FAKE_SPEED: '1800',
+  CHANOMA_RATE_PER_MINUTE: '1000', CHANOMA_RATE_PER_DAY: '1000',
+});
+await waitReady();
+const roomT = await newRoom();
+const roomU = await newRoom();
+const keyT = newDevice();
+await sendPost(roomT, A, keyT);
+await sendPost(roomU, A, keyT);
+fakeMode = 'bad';
+const callsT = fakeCalls;
+const triesT = [];
+for (let i = 0; i < 3; i++) triesT.push((await pressNews(roomT)).status);
+check('試行の上限: 失敗した試行も数える（3回とも 502）', triesT.join(',') === '502,502,502', triesT.join(','));
+const callsAfter3 = fakeCalls;
+fakeMode = 'good';
+r = await pressNews(roomT);
+check('試行の上限: 4回目は 429 で、固定文（内部情報なし）。Claude には問い合わせない', r.status === 429 && r.json?.error?.includes('きょうの番組は作れませんでした') && noInternals(r.text) && fakeCalls === callsAfter3,
+  `${r.status} calls=${fakeCalls - callsAfter3} ${r.text}`);
+check('試行の上限: 3回の失敗で、問い合わせは6回（1回の試行につき、作り直しを入れて2回）', callsAfter3 - callsT === 6, String(callsAfter3 - callsT));
+r = await pressNews(roomU);
+check('試行の上限: ほかの部屋は数えない（そのまま作れる）', r.status === 200 && r.json.made === true, `${r.status} ${r.text}`);
+let rolledT = null;
+for (let i = 0; i < 60 && !rolledT; i++) {
+  await wait(200);
+  const g = await getRoom(roomT);
+  if (g.json.day === '2026-11-05') rolledT = g;
+}
+check('試行の上限: 4:00 を越えて日付の鍵が変わる（2026-11-05）', rolledT !== null, 'まだ変わらない');
+await sendPost(roomT, A, keyT);
+r = await pressNews(roomT);
+check('試行の上限: 別の日になれば、数え直されて作れる', r.status === 200 && r.json.made === true && r.json.program.date === '2026-11-05', `${r.status} ${r.text}`);
+await stopApp(app);
+
 // 4-2. 1秒で1日進む。掃除のタイマーは止めて、部屋を作るときの「古い部屋を消す」道だけを確かめる
 app = startApp({
   CHANOMA_FAKE_NOW: FAKE_NOW, CHANOMA_FAKE_SPEED: '86400', CHANOMA_SWEEP_MS: '3600000000',

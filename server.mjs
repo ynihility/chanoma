@@ -436,6 +436,9 @@ const MAX_SHELF_FETCH = 10;
 // 本棚の差し出しは、番組（48KB）に包みの分を足した大きさまで読む
 const MAX_SHELF_BODY_BYTES = MAX_PROGRAM_BYTES + 16 * 1024;
 const ROOM_FULL_TODAY = `きょうは${MAX_POSTS}件までです。`;
+// 部屋ごとの番組づくりの試行は、1日（日付の鍵ごと）に何回までか。失敗した試行も数える（失敗が続いても費用が膨らまないように）
+const MAX_NEWS_TRIES_PER_ROOM_PER_DAY = 3;
+const NEWS_TRIES_USED = 'きょうの番組は作れませんでした。あした、もう一度お試しください。';
 const ROOM_NOT_FOUND = 'この部屋は見つかりません。';
 const BAD_REQUEST = '送り方が正しくありません。';
 const TOO_MANY = '短い間に送りすぎです。少し待ってから、もう一度お試しください。';
@@ -596,7 +599,7 @@ async function createRoom(req, res) {
   if (rooms.size >= MAX_ROOMS) throw new PublicError(429, 'いま、新しい部屋を作れません。しばらくしてから、もう一度お試しください。');
   let code = newRoomCode();
   while (rooms.has(code)) code = newRoomCode();
-  rooms.set(code, { posts: [], programs: new Map(), generating: null, touchedAt: now(), lastAt: 0 });
+  rooms.set(code, { posts: [], programs: new Map(), generating: null, tries: { day: '', count: 0 }, touchedAt: now(), lastAt: 0 });
   addHit(roomCreateHits, ip);
   console.log(`[room] 部屋を作りました（${shortCode(code)}、いま ${rooms.size} 室）`);
   sendJson(res, 201, { code });
@@ -700,10 +703,15 @@ async function makeRoomNews(req, code, res) {
     room.posts = todaysPosts(room, today);
     const data = cleanPosts({ posts: room.posts.map((e) => e.post), ...(dateCheck.value ? { nextDate: dateCheck.value } : {}) });
     if (!data.ok) throw new PublicError(400, 'きょうの投稿がまだありません。');
+    // 部屋の試行の上限は、全体の枠より先に確かめる（上限に達した部屋が、全体の枠を使わないように）。日付が変われば数え直す
+    if (room.tries.day !== today) room.tries = { day: today, count: 0 };
+    if (room.tries.count >= MAX_NEWS_TRIES_PER_ROOM_PER_DAY) throw new PublicError(429, NEWS_TRIES_USED);
     // 確かめる順番は /api/news と同じ。同時数 → キー → 回数。あとから来て同じ約束を待つ人は、枠を使わない
     if (inFlight >= MAX_IN_FLIGHT) throw new PublicError(429, '番組の準備が混み合っています。少し待ってから、もう一度お試しください。');
     const apiKey = requireApiKey();
     if (!takeRateSlot()) throw new PublicError(429, RATE_LIMITED);
+    // 全体の枠を取れた時点で、問い合わせを始めたことになる。成功でも失敗でも、この試行は数える
+    room.tries.count++;
     gen = { day: today, waiters: 0, done: false, abort: new AbortController(), promise: null };
     inFlight++;
     gen.promise = (async () => {
