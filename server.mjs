@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 // 投稿と番組の検査は、画面でも使う safe.js に一本化している
-import { CORNERS, cleanPosts, checkNews } from './safe.js';
+import { CORNERS, FEATURES, REASONS, cleanPosts, checkNews } from './safe.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 // 1台での実演が前提なので、ほかのパソコンからは届かないように 127.0.0.1 だけで待ち受ける
@@ -88,6 +88,9 @@ const RETRY_HINTS = [
   ['投稿にない英字', '投稿に出てこない言葉を足さないでください。'],
   ['投稿の本文を写している', '投稿の本文を、つなぎの言葉の中でくり返さないでください。'],
   ['なつかしいを選んだ今日の投稿', '見出しが「なつかしい」か札が「なつかしいもの」の、今日のことの投稿は、むかし のコーナーに入れてください。'],
+  ['特集名', '今夜の特集名は、説明にある条件に合うものを選んでください。'],
+  ['編成のわけ', '編成のわけは、そのコーナーに入れた投稿に当てはまるものを選んでください。'],
+  ['lineup', 'lineup には、segments に出てくるコーナーを、出てくる順に1つずつ入れてください。'],
 ];
 // 検査の理由の「…」の中には、返事や投稿の断片（家族の名前など）が入りうる。
 // 断片に」が混ざっていても漏れないように、最後の」までまとめて対象にする
@@ -115,12 +118,16 @@ function takeRateSlot(now = performance.now()) {
 const ALLOWED_HOSTS = new Set([`${HOST}:${PORT}`, `localhost:${PORT}`]);
 const ALLOWED_ORIGINS = new Set([`http://${HOST}:${PORT}`, `http://localhost:${PORT}`]);
 
-// Claude に返してもらう番組の形。本文は返させず、from で元の投稿を指してもらう
+// Claude に返してもらう番組の形。本文は返させず、from で元の投稿を指してもらう。
+// 特集名とわけは、safe.js の一覧から選ばせる（自由な文にしない）。
+// 長さや件数の制約はスキーマに書かず、safe.js で確かめる。出てくる順は、ここに書いた順（すべて必須）
 const NEWS_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['opening', 'segments', 'closing'],
+  required: ['feature', 'opening', 'segments', 'lineup', 'closing'],
   properties: {
+    // 今夜の特集名。opening より前に置き、あいさつで特集にふれるときに食い違わないようにする
+    feature: { type: 'string', enum: FEATURES },
     opening: { type: 'string' },
     segments: {
       type: 'array',
@@ -132,6 +139,19 @@ const NEWS_SCHEMA = {
           corner: { type: 'string', enum: CORNERS },
           from: { type: 'string' },
           host: { type: 'string' },
+        },
+      },
+    },
+    // コーナーごとの、並べたわけ。segments に出てくるコーナーを、出てくる順に1つずつ
+    lineup: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['corner', 'reason'],
+        properties: {
+          corner: { type: 'string', enum: CORNERS },
+          reason: { type: 'string', enum: REASONS },
         },
       },
     },
@@ -227,6 +247,8 @@ async function askClaude(apiKey, data, signal) {
 // Claude に1回だけ問い合わせ、検査に通れば {ok:true, news}、通らなければ {ok:false, reason} を返す。
 // hint は作り直しのときだけ渡す、RETRY_HINTS の決まった言い方
 async function callClaude(apiKey, data, signal, hint, timeoutMs) {
+  // この1回の問い合わせにかかった時間を、成功の記録に残すために測る（戻らない時計 performance.now で）
+  const started = performance.now();
   // 投稿の中に </posts> と書かれていても囲みが崩れないように、< を JSON のエスケープに置き換える
   const postsJson = JSON.stringify({ posts: data.posts, nextDate: data.nextDate }).replace(/</g, '\\u003c');
   const body = {
@@ -302,7 +324,11 @@ async function callClaude(apiKey, data, signal, hint, timeoutMs) {
   const checked = checkNews(news, data.posts);
   // 理由はサーバーの記録にだけ残す（画面には出さない）。作り直すかどうかは呼ぶ側が決める
   if (!checked.ok) return { ok: false, reason: checked.reason };
-  console.log(`[news] 番組を作りました（${checked.news.segments.length}件、出力 ${result.usage?.output_tokens ?? '?'} トークン${hint ? '、作り直し' : ''}）`);
+  // 選んだ特集名とわけは、決まった一覧の言葉だけなので、投稿の中身は記録に残らない。番組づくりの成功率や選び方の偏りを調べるのに使う
+  const { feature, lineup } = checked.news;
+  const plan = feature ? `、特集 ${feature}、わけ ${(lineup ?? []).map((l) => `${l.corner}=${l.reason}`).join(' / ')}` : '';
+  const seconds = ((performance.now() - started) / 1000).toFixed(1);
+  console.log(`[news] 番組を作りました（${checked.news.segments.length}件、出力 ${result.usage?.output_tokens ?? '?'} トークン、${seconds}秒${plan}${hint ? '、作り直し' : ''}）`);
   return { ok: true, news: checked.news };
 }
 
