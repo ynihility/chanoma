@@ -510,7 +510,8 @@
     ul.posts li button { min-height: 56px; }
 
     /* ===== ブラウン管テレビ ===== */
-    #tv-view { position: relative; padding-top: 72px; }
+    /* scroll-margin-top: テレビを画面の先頭へ寄せるとき、アンテナの先が画面の外に切れないようにする余白 */
+    #tv-view { position: relative; padding-top: 72px; scroll-margin-top: var(--gap-3); }
     /* 室内アンテナ（V字の2本と台） */
     .antenna {
       position: absolute;

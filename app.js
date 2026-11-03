@@ -409,6 +409,12 @@ function cancelFx() {
   r?.skip();
 }
 
+// テレビを画面の先頭へ寄せる（テレビと「つぎへ」が、最初の画面に入るように）。
+// 動きを減らす設定の人には、なめらかに動かさず、すぐ移す
+function tvToTop() {
+  $('tv-view').scrollIntoView({ block: 'start', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+}
+
 function setView(onAir) {
   cancelFx();
   $('post-view').hidden = onAir;
@@ -418,8 +424,14 @@ function setView(onAir) {
   $('evening').hidden = onAir;
   // 夜7時: 部屋を暗くして、テレビだけを光らせる
   document.body.classList.toggle('night', onAir);
-  // 押したボタンは隠れるので、フォーカスを新しい画面に移す（キーボードや読み上げの人が迷子にならないように）
-  (onAir ? $('screen') : $('post-title')).focus();
+  // 押したボタンは隠れるので、フォーカスを新しい画面に移す（キーボードや読み上げの人が迷子にならないように）。
+  // テレビのほうは、フォーカスで勝手に動かさず、tvToTop で先頭へ寄せる
+  if (onAir) {
+    $('screen').focus({ preventScroll: true });
+    tvToTop();
+  } else {
+    $('post-title').focus();
+  }
 }
 
 // 今日から日付までの日数（同じ日なら 0）。時刻は無視して、日付だけで数える
@@ -531,8 +543,14 @@ function wipeTo(kind, paint) {
     paint();
     return;
   }
-  // 演出が出入りを受け持つので、中身には、ふわっと出る動きを付けない
-  const mine = fx.playWipe($('screen'), kind, () => paint(true));
+  // 演出が出入りを受け持つので、中身には、ふわっと出る動きを付けない。
+  // 入れ替えで画面の高さが変わると、先頭に寄せた位置がずれるので、四角の陰で入れ替えたあとに、寄せ直す
+  // （途中で終わらせる cancelFx のときは run が空なので、寄せ直さない。すぐ入れ替える場合は mine がまだ空）
+  let mine = null;
+  mine = fx.playWipe($('screen'), kind, () => {
+    paint(true);
+    if (mine && run === mine) tvToTop();
+  });
   run = mine;
   mine.done.then(() => {
     if (run === mine) run = null;
@@ -608,6 +626,7 @@ function watch(r, fromWaiting) {
   if (fromWaiting) {
     play('next');
     wipeTo('mosaic', renderStep);
+    tvToTop();
   } else {
     setView(true);
     play('tvon');
@@ -719,6 +738,7 @@ $('next').addEventListener('click', () => {
   const from = show.steps[show.index];
   show.index = show.index === show.steps.length - 1 ? 0 : show.index + 1;
   goStep(from);
+  tvToTop();
   // 最後の場面では終わりの音、それ以外は鐘の音（はじめに戻るときはテレビの音）
   play(show.index === 0 ? 'tvon' : show.index === show.steps.length - 1 ? 'end' : 'next');
 });
