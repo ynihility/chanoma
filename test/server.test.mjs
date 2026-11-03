@@ -401,6 +401,24 @@ await bad('本文が文字列でない', { posts: [{ id: 'a', who: 'まご', top
 await bad('日付が不正', { posts, nextDate: '来週' }, 400);
 await bad('Content-Type が JSON でない', { posts }, 415, { 'content-type': 'text/plain' });
 await bad('33KB 超', 'x'.repeat(33 * 1024), 413);
+// 絵文字をつなぐ U+200D（家族の絵文字など）は、見えない文字として弾かない。ほかの見えない文字は、何文字目かを伝えて弾く。
+// つなぎの U+200D は見えないので、ソースには直接書かず、文字コードから組み立てる
+const joiner = String.fromCodePoint(0x200D);
+const familyEmoji = [0x1F468, 0x1F469, 0x1F467, 0x1F466].map((c) => String.fromCodePoint(c)).join(joiner);
+const familyPosts = posts.map((p) => {
+  if (p.id === 'p1') return { ...p, text: `きょうは${familyEmoji}で煮物を作った` };
+  if (p.id === 'p2') return { ...p, name: familyEmoji };
+  if (p.id === 'p3') return { ...p, who: familyEmoji };
+  return p;
+});
+lastReq = null;
+r = await call('POST', '/api/news', { posts: familyPosts });
+check('入力: 家族の絵文字（U+200D でつないだ絵文字）が、ひとこと・ニックネーム・よびかたに入っていても 400 にならず 200', r.status === 200, `${r.status} ${r.text}`);
+const sentEmoji = lastReq?.body?.messages?.[0]?.content ?? '';
+check('入力: つないだ絵文字は、3か所とも変わらずに Claude へ渡る', sentEmoji.split(familyEmoji).length - 1 === 3, String(sentEmoji.split(familyEmoji).length - 1));
+const zeroWidthPosts = posts.map((p) => (p.id === 'p1' ? { ...p, text: `あいうえ${String.fromCodePoint(0x200B)}お` } : p));
+r = await call('POST', '/api/news', { posts: zeroWidthPosts });
+check('入力: ゼロ幅スペースは 400 で、何文字目かを伝える文が返る', r.status === 400 && /^ひとことの 5 文字目に、/.test(r.json?.error ?? ''), `${r.status} ${r.text}`);
 r = await call('GET', '/api/news');
 check('GET /api/news -> 405', r.status === 405, String(r.status));
 
