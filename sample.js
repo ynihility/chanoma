@@ -23,7 +23,7 @@ export const SAMPLE_NEWS = {
     { corner: 'ひとこと', from: 's2', host: 'つぎも、そらのお話です。まごからです。' },
     { corner: 'ひとこと', from: 's4', host: 'つづいては、ごはんのお話です。' },
     { corner: 'むかし', from: 's1', host: 'ここからは、むかし話のコーナーです。おばあちゃんのお話です。' },
-    { corner: 'つぎ', from: 's5', host: 'さいごは、つぎに会う日の希望です。おばあちゃんからです。' },
+    { corner: 'つぎ', from: 's5', host: '最後は、つぎに会う日の希望です。おばあちゃんからです。' },
     { corner: 'つぎ', from: 's6', host: 'まごからも、行きたい所の希望です。' },
   ],
   lineup: [
