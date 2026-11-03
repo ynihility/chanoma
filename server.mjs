@@ -207,11 +207,19 @@ class PublicError extends Error {
   }
 }
 
+// 画面のファイルにも JSON の返事にも付ける守りのヘッダー。他のサイトの枠（iframe）に入れられない・参照元を送らない・マイクは自分のページだけ（音声入力のため）
+const SECURITY_HEADERS = {
+  'Content-Security-Policy': "frame-ancestors 'none'",
+  'Referrer-Policy': 'no-referrer',
+  'Permissions-Policy': 'microphone=(self)',
+};
+
 function sendJson(res, status, data) {
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
+    ...SECURITY_HEADERS,
     // 大きすぎる本文を送られたときは、返事を返したあとで接続を閉じて、残りを読み続けない
     ...(status === 413 ? { Connection: 'close' } : {}),
   });
@@ -447,6 +455,8 @@ const TOO_MANY = '短い間に送りすぎです。少し待ってから、も�
 
 // 回数の上限。テストでは少ない回数で上限に届くように、環境変数で差し替えられる（CHANOMA_RATE_* と同じ流儀）
 const ROOMS_PER_IP_PER_DAY = Number(process.env.CHANOMA_ROOMS_PER_IP_PER_DAY) || 5;
+// 送り元 IP は X-Forwarded-For を送る側が偽れるので、IP に頼らない上限も置く。サーバー全体で、部屋を作れるのは1時間に何室までか
+const ROOMS_PER_HOUR = Number(process.env.CHANOMA_ROOMS_PER_HOUR) || 20;
 const ROOM_READS_PER_MINUTE = Number(process.env.CHANOMA_ROOM_READS_PER_MINUTE) || 60;
 const ROOM_WRITES_PER_MINUTE = Number(process.env.CHANOMA_ROOM_WRITES_PER_MINUTE) || 60;
 const POSTS_PER_DEVICE_PER_MINUTE = 10;
@@ -473,9 +483,27 @@ function hitCount(map, key, windowMs) {
   if (list.length === 0) map.delete(key);
   return list.length;
 }
-function addHit(map, key) {
+// 表ごとの、前回の掃除の時刻。掃除は表の全件を調べるので、1分に1回までにする（毎回やると、偽の送り元を大量に送られたとき、そのたびに全件を調べて遅くなる）
+const lastPurgeAt = new WeakMap();
+const PURGE_EVERY_MS = 60_000;
+const HITS_PURGE_AT = 5_000;
+const HITS_MAX = 10_000;
+// windowMs は、その表の窓の長さ。窓より古い記録だけが期限切れになるので、表ごとの長さで掃除する
+function addHit(map, key, windowMs) {
   // 偽の送り元を大量に作られても、記録が増え続けないように、たまったら期限切れを捨てる
-  if (map.size > 10_000) purgeHits(map, 24 * HOUR_MS);
+  if (map.size > HITS_PURGE_AT) {
+    const t = performance.now();
+    const last = lastPurgeAt.get(map);
+    if (last === undefined || t - last >= PURGE_EVERY_MS) {
+      lastPurgeAt.set(map, t);
+      purgeHits(map, windowMs);
+    }
+    // 窓のなかの記録だけで上限を超えているときは、期限切れを待てないので、いちばん古い送り元（先に入れたもの）から捨てる
+    for (const oldest of map.keys()) {
+      if (map.size <= HITS_MAX) break;
+      map.delete(oldest);
+    }
+  }
   const list = map.get(key);
   if (list) list.push(performance.now());
   else map.set(key, [performance.now()]);
@@ -483,25 +511,39 @@ function addHit(map, key) {
 // 上限の中なら数えて true、超えるなら数えずに false
 function takeHit(map, key, limit, windowMs) {
   if (hitCount(map, key, windowMs) >= limit) return false;
-  addHit(map, key);
+  addHit(map, key, windowMs);
   return true;
 }
 function purgeHits(map, windowMs) {
   for (const key of [...map.keys()]) hitCount(map, key, windowMs);
 }
 const roomCreateHits = new Map(); // 送り元 IP → 部屋を作った時刻（1日）
+const roomCreateAllHits = new Map(); // 'all' → サーバー全体で部屋を作った時刻（1時間）。IP に頼らない上限
 const roomReadHits = new Map(); // 送り元 IP → 読みに来た時刻（1分）
 const roomWriteHits = new Map(); // 送り元 IP → 書きに来た時刻（1分）
 const deviceHits = new Map(); // 端末の鍵のハッシュ → 投稿した時刻（1分）
 
-// 送り元 IP。公開では置き場所の中継を通って届くので、X-Forwarded-For の先頭を使う（偽れる可能性は、既知の制限）。
+// X-Forwarded-For の右から何番目を送り元とするか。置き場所の前に並ぶ中継の段数に合わせる（Render で実測して決める。既定は1段）
+const TRUSTED_HOPS = Math.max(1, Math.floor(Number(process.env.CHANOMA_TRUSTED_HOPS)) || 1);
+// CHANOMA_LOG_XFF=1 のとき、最初の5リクエストだけ、X-Forwarded-For の値の数を記録する（段数を実測するため。IP の値そのものは記録しない）
+const LOG_XFF = process.env.CHANOMA_LOG_XFF === '1';
+let xffLogged = 0;
+
+// 送り元 IP。公開では置き場所の中継を通って届くので、X-Forwarded-For の右から TRUSTED_HOPS 番目を使う。
+// 中継は、受け取った値の右に自分が見た相手のアドレスを足していくので、送る側が先頭に足した値は右から数えれば無視される。N は置き場所の中継の段数
+// （段数の設定が実際とちがうと、IP ごとの上限は回避されたり共有されたりする。費用の上限は IP に頼らない）。
 // ローカルでは、ヘッダーは信じず、つながってきた相手のアドレスを使う
 function clientIp(req) {
   if (PUBLIC) {
     const forwarded = req.headers['x-forwarded-for'];
-    if (typeof forwarded === 'string') {
-      const first = forwarded.split(',')[0].trim();
-      if (first && first.length <= 64) return first;
+    const values = typeof forwarded === 'string' ? forwarded.split(',').map((v) => v.trim()).filter((v) => v !== '') : [];
+    if (LOG_XFF && xffLogged < 5) {
+      xffLogged++;
+      console.log(`[room] X-Forwarded-For の値の数: ${values.length}（右から ${TRUSTED_HOPS} 番目を使用）`);
+    }
+    if (values.length > 0) {
+      const picked = values.length >= TRUSTED_HOPS ? values[values.length - TRUSTED_HOPS] : values[values.length - 1];
+      if (picked.length <= 64) return picked;
     }
   }
   return req.socket.remoteAddress ?? 'unknown';
@@ -551,6 +593,7 @@ function sweep() {
     oldPosts += before - room.posts.length;
   }
   purgeHits(roomCreateHits, DAY_MS);
+  purgeHits(roomCreateAllHits, HOUR_MS);
   purgeHits(roomReadHits, 60_000);
   purgeHits(roomWriteHits, 60_000);
   purgeHits(deviceHits, 60_000);
@@ -591,18 +634,22 @@ function storeProgram(room, date, program) {
 }
 
 // POST /api/room: 部屋を作り、コードを返す
-async function createRoom(req, res) {
+async function createRoom(req, res, ip) {
   await readJson(req);
-  const ip = clientIp(req);
   if (hitCount(roomCreateHits, ip, DAY_MS) >= ROOMS_PER_IP_PER_DAY) {
     throw new PublicError(429, 'きょうは作れる部屋の数に達しました。あした、もう一度お試しください。');
+  }
+  // 送り元を偽られても守れるように、IP に頼らないサーバー全体の上限を、IP ごとの上限の次に確かめる
+  if (hitCount(roomCreateAllHits, 'all', HOUR_MS) >= ROOMS_PER_HOUR) {
+    throw new PublicError(429, 'いま、新しい部屋を作れません。しばらくしてから、もう一度お試しください。');
   }
   if (rooms.size >= MAX_ROOMS) evictStaleRooms();
   if (rooms.size >= MAX_ROOMS) throw new PublicError(429, 'いま、新しい部屋を作れません。しばらくしてから、もう一度お試しください。');
   let code = newRoomCode();
   while (rooms.has(code)) code = newRoomCode();
   rooms.set(code, { posts: [], programs: new Map(), generating: null, tries: { day: '', count: 0 }, touchedAt: now(), lastAt: 0 });
-  addHit(roomCreateHits, ip);
+  addHit(roomCreateHits, ip, DAY_MS);
+  addHit(roomCreateAllHits, 'all', HOUR_MS);
   console.log(`[room] 部屋を作りました（${shortCode(code)}、いま ${rooms.size} 室）`);
   sendJson(res, 201, { code });
 }
@@ -792,7 +839,7 @@ async function handleRoom(req, res, pathname, url) {
   };
   if (segs.length === 0) {
     expect('POST');
-    return createRoom(req, res);
+    return createRoom(req, res, ip);
   }
   if (segs.length === 1) {
     expect('GET');
@@ -835,6 +882,7 @@ async function handleStatic(pathname, res) {
     // フォントは大きい（約2MB）うえに変わらないので、1日は端末に保存させる。ほかは、直したらすぐ反映されるよう保存させない
     'Cache-Control': entry[1].startsWith('font/') ? 'public, max-age=86400' : 'no-store',
     'X-Content-Type-Options': 'nosniff',
+    ...SECURITY_HEADERS,
   });
   res.end(file);
 }

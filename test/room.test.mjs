@@ -90,7 +90,8 @@ function startApp(env) {
   roomsCreated = 0;
   const child = spawn('node', ['server.mjs'], {
     cwd: ROOT,
-    env: { ...process.env, PORT: String(APP_PORT), CHANOMA_API_BASE: `http://127.0.0.1:${FAKE_PORT}`, ANTHROPIC_API_KEY: FAKE_KEY, ...env },
+    // 部屋の作成のサーバー全体の上限（1時間）は、ふつうのテストが何室作っても当たらないよう大きくしておく。上限そのものを確かめるテストだけが上書きする
+    env: { ...process.env, PORT: String(APP_PORT), CHANOMA_API_BASE: `http://127.0.0.1:${FAKE_PORT}`, ANTHROPIC_API_KEY: FAKE_KEY, CHANOMA_ROOMS_PER_HOUR: '100000', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const app = { child, log: '' };
@@ -597,12 +598,16 @@ check('公開: Host が localhost なら 403（CHANOMA_ORIGIN にない）', r.s
 r = await call('POST', '/api/room', {}, pub('198.51.100.1'));
 check('公開: 許可した Origin からは作れる', r.status === 201, String(r.status));
 
-// IP: X-Forwarded-For の先頭を使う（2つ目以降を変えても、同じ送り元）
+// IP: X-Forwarded-For は右から数える（既定は1番目）。送る側が先頭に足した値は、送り元に影響しない
 const xffCodes = [];
-for (let i = 0; i < 6; i++) xffCodes.push((await call('POST', '/api/room', {}, pub(`198.51.100.77, 10.0.0.${i}`))).status);
-check('公開: 送り元は X-Forwarded-For の先頭。先頭が同じなら、2つ目を変えても5部屋まで（6つ目は 429）', xffCodes.join(',') === '201,201,201,201,201,429', xffCodes.join(','));
-r = await call('POST', '/api/room', {}, pub('198.51.100.78, 198.51.100.77'));
-check('公開: 先頭がちがう送り元なら、作れる', r.status === 201, String(r.status));
+for (let i = 0; i < 6; i++) xffCodes.push((await call('POST', '/api/room', {}, pub(`198.51.100.${i + 1}, 198.51.100.2, 203.0.113.9`))).status);
+check('公開: 送り元は X-Forwarded-For の右端（既定）。先頭を変えても同じ送り元で、5部屋まで（6つ目は 429）', xffCodes.join(',') === '201,201,201,201,201,429', xffCodes.join(','));
+r = await call('POST', '/api/room', {}, pub('198.51.100.1, 198.51.100.2, 203.0.113.10'));
+check('公開: 右端がちがう送り元なら、作れる', r.status === 201, String(r.status));
+const soloCodes = [];
+for (let i = 0; i < 5; i++) soloCodes.push((await call('POST', '/api/room', {}, pub('198.51.100.80'))).status);
+r = await call('POST', '/api/room', {}, pub('203.0.113.77, , 198.51.100.80'));
+check('公開: 値が1つだけのときはその値。空の要素は数えず、先頭に足された値があっても同じ送り元（6つ目は 429）', soloCodes.join(',') === '201,201,201,201,201' && r.status === 429, `${soloCodes.join(',')} / ${r.status}`);
 
 // 3台（3つの鍵）が、同じ部屋で同じ番組を見る
 const ipA = '192.0.2.10';
@@ -656,6 +661,74 @@ check('部屋の上限: 送り元がちがっても、100室なら 429', r.statu
 r = await call('GET', `/api/room/${roomP}`, undefined, pub(ipA));
 check('部屋の上限: 上限に達しても、既存の部屋は読める', r.status === 200, String(r.status));
 check('記録: 公開でも、部屋のコードの全部や投稿の本文は、ログに出ていない', !app.log.includes(roomP) && !/煮物|にじ|アルバム/.test(app.log) && !app.log.includes(keyGrand), app.log.slice(0, 300));
+await stopApp(app);
+
+// 送り元の数え方（CHANOMA_TRUSTED_HOPS）。2段の中継の後ろでは、右から2番目が本当の送り元。CHANOMA_LOG_XFF で値の数だけを記録する
+app = startApp({ CHANOMA_PUBLIC: '1', CHANOMA_ORIGIN: ORIGIN, CHANOMA_TRUSTED_HOPS: '2', CHANOMA_LOG_XFF: '1' });
+await waitReady();
+const hops2 = [];
+for (let i = 0; i < 6; i++) hops2.push((await call('POST', '/api/room', {}, pub(`198.51.100.50, 198.51.100.51, 203.0.113.${i + 1}`))).status);
+check('中継の段数2: 右から2番目が送り元。右端を変えても同じ送り元で、5部屋まで（6つ目は 429）', hops2.join(',') === '201,201,201,201,201,429', hops2.join(','));
+r = await call('POST', '/api/room', {}, pub('198.51.100.50, 198.51.100.52, 203.0.113.1'));
+check('中継の段数2: 右から2番目がちがえば、別の送り元として作れる', r.status === 201, String(r.status));
+await call('POST', '/api/room', {}, pub('198.51.100.60'));
+await call('POST', '/api/room', {}, pub('198.51.100.61'));
+check('中継の段数2: 記録は、最初の5リクエストだけ。値の数だけで、IP そのものは出ない',
+  (app.log.match(/X-Forwarded-For の値の数: \d+（右から 2 番目を使用）/g) ?? []).length === 5 && app.log.includes('値の数: 3（右から 2 番目を使用）')
+  && !app.log.includes('198.51.100') && !app.log.includes('203.0.113'), app.log);
+await stopApp(app);
+
+app = startApp({ CHANOMA_PUBLIC: '1', CHANOMA_ORIGIN: ORIGIN, CHANOMA_TRUSTED_HOPS: '3' });
+await waitReady();
+const hops3 = [];
+for (let i = 0; i < 5; i++) hops3.push((await call('POST', '/api/room', {}, pub(`198.51.100.${i + 1}, 203.0.113.1`))).status);
+r = await call('POST', '/api/room', {}, pub('198.51.100.99, 203.0.113.1'));
+check('中継の段数3: 値が段数より少ないときは、いちばん右の値が送り元（6つ目は 429）', hops3.join(',') === '201,201,201,201,201' && r.status === 429, `${hops3.join(',')} / ${r.status}`);
+r = await call('POST', '/api/room', {}, pub('198.51.100.1, 198.51.100.2, 203.0.113.2, 203.0.113.1'));
+check('中継の段数3: 4つの値なら、右から3番目が送り元（右端とはちがう送り元なので作れる）', r.status === 201, String(r.status));
+await stopApp(app);
+
+// サーバー全体の部屋の作成の上限。送り元を変えても、1時間に作れる数は決まっている
+app = startApp({ CHANOMA_PUBLIC: '1', CHANOMA_ORIGIN: ORIGIN, CHANOMA_ROOMS_PER_HOUR: '2' });
+await waitReady();
+const hourCodes = [];
+for (let i = 0; i < 3; i++) hourCodes.push((await call('POST', '/api/room', {}, pub(`198.51.100.${i + 1}`))).status);
+r = await call('POST', '/api/room', {}, pub('198.51.100.200'));
+check('全体の上限: 1時間に作れる部屋は CHANOMA_ROOMS_PER_HOUR まで。別の IP でも 3室目は 429（固定文で、内部情報なし）',
+  hourCodes.join(',') === '201,201,429' && r.status === 429 && r.json?.error?.includes('いま、新しい部屋を作れません') && noInternals(r.text), `${hourCodes.join(',')} / ${r.status} ${r.text}`);
+await stopApp(app);
+
+// 既定は1時間に20室（環境変数が空なら既定）
+app = startApp({ CHANOMA_PUBLIC: '1', CHANOMA_ORIGIN: ORIGIN, CHANOMA_ROOMS_PER_HOUR: '' });
+await waitReady();
+const defHour = [];
+for (let i = 0; i < 21; i++) defHour.push((await call('POST', '/api/room', {}, pub(`198.51.100.${i + 1}`))).status);
+check('全体の上限: 既定は1時間に20室（別の IP を使っても21室目は 429）', defHour.slice(0, 20).every((x) => x === 201) && defHour[20] === 429, defHour.join(','));
+await stopApp(app);
+
+// 回数の記録の掃除。偽の送り元を大量に作られても、記録が1万件を超えて増えない（いちばん古いものから捨てる）
+app = startApp({ CHANOMA_PUBLIC: '1', CHANOMA_ORIGIN: ORIGIN, CHANOMA_ROOM_READS_PER_MINUTE: '1' });
+await waitReady();
+const victim = pub('192.0.2.200');
+const victimFirst = (await call('GET', `/api/room/${unknown}`, undefined, victim)).status;
+const victimSecond = (await call('GET', `/api/room/${unknown}`, undefined, victim)).status;
+let floodBad = 0;
+{
+  const total = 10_100;
+  let next = 0;
+  const worker = async () => {
+    while (next < total) {
+      const n = next++;
+      const st = (await call('GET', `/api/room/${unknown}`, undefined, pub(`10.${(n >> 16) & 255}.${(n >> 8) & 255}.${n & 255}`))).status;
+      if (st !== 404) floodBad++;
+    }
+  };
+  await Promise.all(Array.from({ length: 50 }, worker));
+}
+const victimAfter = (await call('GET', `/api/room/${unknown}`, undefined, victim)).status;
+check('掃除: 1分に1回までの上限なら、同じ送り元の2回目は 429（前提）', victimFirst === 404 && victimSecond === 429, `${victimFirst},${victimSecond}`);
+check('掃除: 偽の送り元を1万件あまり送っても、どれも通常どおり答える（429 や 5xx にならない）', floodBad === 0, `${floodBad} 件がふつうでない返事`);
+check('掃除: 記録は1万件までで、いちばん古い送り元から捨てられる（捨てられた送り元は、また 404 になる）', victimAfter === 404, String(victimAfter));
 await stopApp(app);
 
 // 公開で CHANOMA_ORIGIN がないと、止まる（許可の書き忘れで、だれからでも呼べる状態にしない）
@@ -759,7 +832,8 @@ for (let i = 0; i < 100 && lastStatus === 201; i++) {
 }
 r = await call('POST', '/api/room', {});
 check('古い部屋: 100室を作ると、101室目は 429（まだ3日たっていない）', many.length === 100 && r.status === 429, `${many.length}室 ${r.status} 経過 ${Date.now() - startedAt}ms`);
-check('古い部屋: ここまでが3日（約3秒）より短い時間で終わっている', Date.now() - startedAt < 2500, `${Date.now() - startedAt}ms`);
+// 3日＝約3秒。遅い機械でも落ちないよう、その手前いっぱい（2900ms）まで許す
+check('古い部屋: ここまでが3日（約3秒）より短い時間で終わっている', Date.now() - startedAt < 2900, `${Date.now() - startedAt}ms`);
 await wait(3400 - (Date.now() - startedAt));
 r = await call('POST', '/api/room', {});
 check('古い部屋: 3日さわられていない部屋があれば、それを消して、新しい部屋を作れる', r.status === 201, `${r.status} ${r.text}`);

@@ -429,6 +429,15 @@ for (const p of ['/.env', '/server.mjs', '/prompt.txt', '/.git/config', '/../ser
 }
 r = await call('GET', '/');
 check('配る: / は index.html', r.status === 200 && r.text.includes('<'), String(r.status));
+// 他のサイトの枠に入れられない・参照元を送らない・マイクは自分のページだけ。画面のファイルと JSON の返事の両方に付く
+for (const p of ['/', '/api/news']) {
+  const hres = await fetch(`http://127.0.0.1:${APP_PORT}${p}`);
+  await hres.arrayBuffer();
+  const h = hres.headers;
+  check(`ヘッダー: ${p} に frame-ancestors・Referrer-Policy・Permissions-Policy が付く`,
+    h.get('content-security-policy') === "frame-ancestors 'none'" && h.get('referrer-policy') === 'no-referrer' && h.get('permissions-policy') === 'microphone=(self)',
+    `${h.get('content-security-policy')} / ${h.get('referrer-policy')} / ${h.get('permissions-policy')}`);
+}
 // 見本の番組（sample.js）が配られる。画面が読み込むようになったあとは、下の「画面が読み込む JS」の確かめにも自動で入る
 const sampleRes = await fetch(`http://127.0.0.1:${APP_PORT}/sample.js`);
 const sampleBody = await sampleRes.text();
