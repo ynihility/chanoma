@@ -1,7 +1,10 @@
 // safe.js のテスト。実行: node --test
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanPosts, cleanDate, checkNews, loadState, serializeState, MAX_POSTS } from '../safe.js';
+import {
+  cleanPosts, cleanDate, checkNews, loadState, serializeState, MAX_POSTS,
+  isRoomCode, isDeviceHash, isDateKey, cleanPost, checkPostWords, checkShelfProgram, MAX_PROGRAM_BYTES,
+} from '../safe.js';
 
 const posts = [
   { id: 'p1', who: 'おばあちゃん', topic: 'ごはん', headline: 'おいしかった', text: 'きょうは煮物を作った' },
@@ -1060,4 +1063,149 @@ test('通す(本文の写し): 本文につないだ絵文字がある投稿で�
     const r = callWithText('きょうは' + FAMILY3 + BODY_TAIL, host);
     assert.equal(r.ok, true, `${host}: ${r.reason}`);
   }
+});
+
+// ---- 部屋で使う検査（コード・鍵・投稿1件・投稿の言葉・本棚の番組） ----
+test('isRoomCode: 英数字22字だけ通す', () => {
+  assert.equal(isRoomCode('abcDEF0123456789abcdEF'), true);
+  assert.equal(isRoomCode('A'.repeat(22)), true);
+  for (const bad of ['', 'a'.repeat(21), 'a'.repeat(23), 'abcDEF012345678-abcdEF', 'abcDEF012345678_abcdEF', 'abcDEF012345678 abcdEF',
+    'abcDEF012345678abcdE\n', 'あ'.repeat(22), 'ａｂｃＤＥＦ０１２３４５６７８９ａｂｃｄＥＦ', null, undefined, 123, ['a'.repeat(22)], {}]) {
+    assert.equal(isRoomCode(bad), false, JSON.stringify(bad));
+  }
+});
+
+test('isDeviceHash: 小文字16進の64字だけ通す', () => {
+  assert.equal(isDeviceHash('0123456789abcdef'.repeat(4)), true);
+  for (const bad of ['', 'a'.repeat(63), 'a'.repeat(65), 'A'.repeat(64), 'g'.repeat(64), ` ${'a'.repeat(63)}`, `${'a'.repeat(64)}\n`, null, 5, {}]) {
+    assert.equal(isDeviceHash(bad), false, JSON.stringify(bad));
+  }
+});
+
+test('isDateKey: 実在する YYYY-MM-DD だけ通す', () => {
+  assert.equal(isDateKey('2026-11-05'), true);
+  assert.equal(isDateKey('2028-02-29'), true);
+  for (const bad of ['', '2026-02-31', '2026-13-01', '2026-1-5', '20261105', '2019-12-31', '2101-01-01', '2026-11-05 ', null, undefined, 20261105]) {
+    assert.equal(isDateKey(bad), false, JSON.stringify(bad));
+  }
+});
+
+test('cleanPost: 投稿1件を、cleanPosts と同じ検査で作り直す', () => {
+  const r = cleanPost({ ...posts[0], extra: 'x', device: 'abc' });
+  assert.equal(r.ok, true);
+  assert.deepEqual(Object.keys(r.post).sort(), ['headline', 'id', 'text', 'topic', 'who']);
+  // 同じ ID を続けて検査しても、前の呼び出しに引きずられない（1件ごとに独立）
+  assert.equal(cleanPost(posts[0]).ok, true);
+  for (const bad of [null, undefined, 'x', [], {}, { ...posts[0], id: '../x' }, { ...posts[0], who: '' }, { ...posts[0], topic: 'ない' },
+    { ...posts[0], text: 'あ'.repeat(201) }, { ...posts[0], text: '改\n行' }, { ...posts[0], wishDate: '2026-11-20' }]) {
+    const x = cleanPost(bad);
+    assert.equal(x.ok, false, JSON.stringify(bad));
+    assert.equal(typeof x.error, 'string');
+  }
+  // 投稿の束を渡しても通さない
+  assert.equal(cleanPost({ posts: [posts[0]] }).ok, false);
+});
+
+test('checkPostWords: ふつうの本文は通し、本文は書き換えない', () => {
+  for (const text of ['きょうは煮物を作った', 'にじが見えた', '効果音がよかった', 'ぼけっとしていた', '一番星が見えた', '']) {
+    const post = { id: 'a', who: 'まご', topic: 'そら', text };
+    assert.deepEqual(checkPostWords(post), { ok: true }, text);
+    assert.equal(post.text, text);
+  }
+  assert.deepEqual(checkPostWords({ id: 'a', who: 'まご', topic: 'そら' }), { ok: true });
+  assert.deepEqual(checkPostWords(null), { ok: true });
+});
+
+test('checkPostWords: 健康・助言・催促の言葉は、理由つきで止める（分断しても、全角でも）', () => {
+  const cases = [
+    ['元気になった', /健康/], ['健康にいいらしい', /健康/], ['さみしかった', /健康/], ['ひとりぼっちだった', /健康/],
+    ['もう病院へ行ったほうがいい', /助言/], ['早めに休みましょう', /助言/], ['早く寝ましょう', /助言/],
+    ['また来てね', /催促/], ['返事をください', /催促/], ['教えてほしい', /催促/], ['まだ来ません', /催促/],
+    ['健、康によさそう', /健康/], ['健 康によさそう', /健康/], ['健\u034F康によさそう', /健康/], ['ホウガイイ。もう病院へ', /助言/],
+  ];
+  for (const [text, reason] of cases) {
+    const post = { id: 'a', who: 'まご', topic: 'そら', text };
+    const r = checkPostWords(post);
+    assert.equal(r.ok, false, text);
+    assert.match(r.reason, reason, text);
+    assert.equal(post.text, text);
+  }
+});
+
+// 本棚の番組。投稿の写しと、それに合う番組
+const shelfProgram = (patch = {}) => ({ news: goodNews(), posts: structuredClone(posts), madeAt: 1_800_000_000_000, ...patch });
+
+test('checkShelfProgram: 正しい番組を通し、検査で作り直した値だけを返す', () => {
+  const input = shelfProgram({ nextDate: '2026-11-20', junk: 'x' });
+  input.news.junk = '<script>';
+  input.news.segments[0].html = '<b>';
+  input.posts[0].device = 'abc';
+  const r = checkShelfProgram(input);
+  assert.equal(r.ok, true, r.error);
+  assert.deepEqual(Object.keys(r.program).sort(), ['madeAt', 'news', 'nextDate', 'posts']);
+  assert.deepEqual(r.program.news, goodNews());
+  assert.equal(r.program.posts.length, 4);
+  assert.equal('device' in r.program.posts[0], false);
+  assert.equal(r.program.madeAt, 1_800_000_000_000);
+  assert.equal(r.program.nextDate, '2026-11-20');
+  // 返した値は入力とは別のオブジェクト
+  assert.notEqual(r.program.news, input.news);
+  // nextDate がなければ、返す値にも入れない
+  assert.equal('nextDate' in checkShelfProgram(shelfProgram()).program, false);
+});
+
+test('checkShelfProgram: 形の悪いものや検査に落ちるものは弾く', () => {
+  const longHost = shelfProgram();
+  longHost.news.segments[0].host = 'あ'.repeat(200);
+  const unknownId = shelfProgram();
+  unknownId.news.segments[0].from = 'zzz';
+  const newPerson = shelfProgram();
+  newPerson.news.segments[1].host = 'おじいちゃんも喜んでいそうです。';
+  const newName = shelfProgram();
+  newName.news.segments[1].host = 'はなこさんのひとことです。';
+  const advice = shelfProgram();
+  advice.news.closing = '早めに病院へ行ったほうがいいですよ。';
+  const missing = shelfProgram();
+  missing.news.segments = missing.news.segments.slice(0, 3);
+  const bannedPost = shelfProgram();
+  bannedPost.posts[0].text = 'また来てね';
+  const cases = {
+    '入力が空': null, '配列': [], '文字列': 'x',
+    'news がない': shelfProgram({ news: undefined }), 'news が配列': shelfProgram({ news: [] }),
+    'posts がない': shelfProgram({ posts: undefined }), 'posts が空': shelfProgram({ posts: [] }),
+    'posts が31件': shelfProgram({ posts: Array.from({ length: MAX_POSTS + 1 }, (_, i) => ({ id: `q${i}`, who: 'まご', topic: 'そら' })) }),
+    'madeAt がない': shelfProgram({ madeAt: undefined }), 'madeAt が文字列': shelfProgram({ madeAt: '1800000000000' }),
+    'madeAt が小数': shelfProgram({ madeAt: 1.5 }), 'madeAt が0': shelfProgram({ madeAt: 0 }),
+    'nextDate が壊れている': shelfProgram({ nextDate: '2026-02-31' }),
+    '司会の文が長すぎる': longHost, '投稿にない ID': unknownId, '投稿にない人': newPerson, '投稿にない名前': newName,
+    'あいさつに助言': advice, '投稿が抜けた': missing, '投稿の本文に催促': bannedPost,
+  };
+  for (const [name, input] of Object.entries(cases)) {
+    const r = checkShelfProgram(input);
+    assert.equal(r.ok, false, name);
+    assert.equal(typeof r.error, 'string', name);
+  }
+});
+
+test('checkShelfProgram: 大きすぎる番組は、中身を見る前に弾く（48KB）', () => {
+  const r = checkShelfProgram(shelfProgram({ junk: 'x'.repeat(MAX_PROGRAM_BYTES) }));
+  assert.equal(r.ok, false);
+  assert.match(r.error, /大きすぎ/);
+  // 日本語は1文字3バイトで数える: 文字数では48K未満でも、バイト数で超えれば弾く
+  const wide = checkShelfProgram(shelfProgram({ junk: 'あ'.repeat(MAX_PROGRAM_BYTES / 3) }));
+  assert.equal(wide.ok, false);
+  assert.match(wide.error, /大きすぎ/);
+  // ぎりぎり収まる大きさなら、大きさでは弾かない
+  const base = Buffer.byteLength(JSON.stringify(shelfProgram({ junk: '' })));
+  const fit = checkShelfProgram(shelfProgram({ junk: 'x'.repeat(MAX_PROGRAM_BYTES - base - 20) }));
+  assert.equal(fit.ok, true, fit.error);
+});
+
+test('checkShelfProgram: 返す理由に、番組の断片は含まれない', () => {
+  const secret = shelfProgram();
+  secret.news.segments[1].host = 'ハンバーグの話です。';
+  const r = checkShelfProgram(secret);
+  assert.equal(r.ok, false);
+  assert.equal(r.error.includes('ハンバーグ'), false);
+  assert.equal(typeof r.reason, 'string');
 });

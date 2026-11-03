@@ -325,6 +325,17 @@ function makeContext(posts) {
 // 本文の写しの照合に使う形。ひらがなに直し、記号と、絵文字をつなぐ U+200D を除く（本文のつないだ絵文字だけを抜いて写した文も、写しとして見つけるため）
 const quoteForm = (s) => fold(s).replace(/[\p{P}\p{S}\u200D]/gu, '');
 
+// 健康・助言・催促の言葉の検査。司会の文（wordProblem）と、部屋に送る投稿の本文（checkPostWords）で同じ判定を使うため、1か所にまとめている。
+// g は fold して記号や見えないつなぎの字を除いた形、f は fold しただけの形。問題があれば理由を、なければ null を返す
+function bannedWordProblem(g, f) {
+  const health = removeAll(g, HEALTH_BENIGN);
+  if (HEALTH_WORDS.some((w) => health.includes(w))) return '健康や孤独にふれる言葉がある';
+  if (ADVICE_WORDS.some((w) => g.includes(w)) || ADVICE_PATTERN.test(g)) return '助言や指図にあたる言葉がある';
+  const urging = removeAll(g, URGING_BENIGN);
+  if (URGING_WORDS.some((w) => urging.includes(w)) || URGING_PATTERN.test(f)) return '催促や返事を求める言葉がある';
+  return null;
+}
+
 // 1つの文を検査し、問題があれば理由を、なければ null を返す
 function wordProblem(s, ctx) {
   // 絵文字をつなぐ U+200D は、見えない文字に数えない（投稿の名前に使えるつないだ絵文字を、司会が名前のまま呼べるように）。
@@ -340,11 +351,8 @@ function wordProblem(s, ctx) {
   if (MARKUP.test(removeAll(n, ctx.nameForms))) return 'HTMLや記号、URL、絵文字が混ざっている';
   const rank = removeAll(g, RANK_BENIGN);
   if (RANK_WORDS.some((w) => rank.includes(w)) || RANK_PATTERN.test(rank)) return '順位づけや比べる言葉がある';
-  const health = removeAll(g, HEALTH_BENIGN);
-  if (HEALTH_WORDS.some((w) => health.includes(w))) return '健康や孤独にふれる言葉がある';
-  if (ADVICE_WORDS.some((w) => g.includes(w)) || ADVICE_PATTERN.test(g)) return '助言や指図にあたる言葉がある';
-  const urging = removeAll(g, URGING_BENIGN);
-  if (URGING_WORDS.some((w) => urging.includes(w)) || URGING_PATTERN.test(f)) return '催促や返事を求める言葉がある';
+  const banned = bannedWordProblem(g, f);
+  if (banned) return banned;
   if (DAYS_PATTERN.test(g)) return '残り日数を言っている';
   if (DATE_PATTERN_WORDS.test(g)) return '日付や曜日を言っている';
 
@@ -538,4 +546,74 @@ export function checkNews(news, posts) {
     result.lineup = items;
   }
   return { ok: true, news: result };
+}
+
+// ---- 部屋（家族でつながるサーバーの同期）で使う検査 ----
+// 部屋のコード・端末の鍵・本棚の番組は、ネットワークの向こうから届く。サーバーでも端末でも、同じ形の検査をここで行う
+
+// 1本の番組（投稿の写しを含む）の大きさの上限。サーバーは部屋ごとに最大30本を持つので、全体の上限もこれで決まる
+export const MAX_PROGRAM_BYTES = 48 * 1024;
+// 部屋のコードは、サーバーが乱数で作る英数字22字（62文字から22字で、約131ビット）
+const ROOM_CODE_PATTERN = /^[A-Za-z0-9]{22}$/;
+// 端末の鍵のハッシュ（SHA-256 を小文字の16進数にした64字）
+const DEVICE_HASH_PATTERN = /^[0-9a-f]{64}$/;
+
+export const isRoomCode = (value) => typeof value === 'string' && ROOM_CODE_PATTERN.test(value);
+export const isDeviceHash = (value) => typeof value === 'string' && DEVICE_HASH_PATTERN.test(value);
+// 日付の鍵（YYYY-MM-DD）。形だけでなく、存在する日付かも確かめる
+export function isDateKey(value) {
+  if (typeof value !== 'string') return false;
+  const r = cleanDate(value);
+  return r.ok && r.value === value;
+}
+
+// 投稿1件を検査する。cleanPosts の1件分と同じ検査で、成功なら {ok:true, post}、失敗なら {ok:false, error}
+export function cleanPost(input) {
+  try {
+    return { ok: true, post: buildPost(input, new Set()) };
+  } catch (e) {
+    if (e instanceof Invalid) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+// 投稿の本文に、健康・助言・催促の言葉がないかを調べる。本人の言葉は書き換えず、引っかかったら理由を返すだけ。
+// 司会の文（wordProblem）と同じ言葉の一覧と正規化を使う。成功なら {ok:true}、失敗なら {ok:false, reason}
+export function checkPostWords(post) {
+  const text = post && typeof post === 'object' ? post.text : undefined;
+  if (typeof text !== 'string' || text === '') return { ok: true };
+  const f = fold(text);
+  const reason = bannedWordProblem(f.replace(SPLITTERS, ''), f);
+  return reason ? { ok: false, reason } : { ok: true };
+}
+
+// 本棚の番組（端末から差し出された、または端末から戻ってきたもの）を検査する。
+// 入力は { news, posts, madeAt, nextDate? }。成功なら、検査で作り直した値だけを持つ {ok:true, program}、失敗なら {ok:false, error}。
+// 入力のオブジェクトはそのまま使わず、投稿も番組も、検査が返した新しい値だけを返す。
+// 他人の端末から来るものなので、サーバーで作った番組と同じ扱いにはしない（投稿の言葉の検査も、番組の検査も通す）
+export function checkShelfProgram(input) {
+  const bad = (error, reason) => ({ ok: false, error, ...(reason ? { reason } : {}) });
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return bad('番組の形が正しくありません。');
+  let bytes;
+  try {
+    bytes = new TextEncoder().encode(JSON.stringify(input)).length;
+  } catch {
+    return bad('番組の形が正しくありません。');
+  }
+  if (bytes > MAX_PROGRAM_BYTES) return bad('番組が大きすぎます。');
+  const { news, posts, nextDate, madeAt } = input;
+  if (!Number.isSafeInteger(madeAt) || madeAt <= 0) return bad('番組を作った時刻が正しくありません。');
+  const cleaned = cleanPosts({ posts, nextDate });
+  if (!cleaned.ok) return bad(cleaned.error);
+  for (const post of cleaned.posts) {
+    const w = checkPostWords(post);
+    if (!w.ok) return bad('投稿に使えない言葉があります。', w.reason);
+  }
+  const checked = checkNews(news, cleaned.posts);
+  // 理由には番組の断片が入りうるので、画面に返す文には含めない（サーバーの記録用に reason だけ別に返す）
+  if (!checked.ok) return bad('番組の中身が決まりに合いません。', checked.reason);
+  return {
+    ok: true,
+    program: { news: checked.news, posts: cleaned.posts, ...(cleaned.nextDate ? { nextDate: cleaned.nextDate } : {}), madeAt },
+  };
 }
