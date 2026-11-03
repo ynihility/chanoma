@@ -164,6 +164,19 @@ const LIMITS = {
 // 上限をこえている字数（こえていなければ 0）
 const overBy = (id) => Math.max(0, countOf(LIMITS[id].read()) - LIMITS[id].max);
 
+// 文字を、上限の字数（countOf で数えた数）に収まる所までで切る。
+// Array.from で1字ずつに分けてから数えるので、絵文字のような2つ組の文字（サロゲートペア）を途中で割って、壊れた字を残すことがない
+function clipText(text, max) {
+  let out = '';
+  let used = 0;
+  for (const ch of Array.from(text)) {
+    used += countOf(ch);
+    if (used > max) break;
+    out += ch;
+  }
+  return out;
+}
+
 // 入力欄の下の文字数の表示を、いまの入力に合わせる。
 // 残りの数が前と同じときは触らない（読み上げが、同じ案内をくり返さないように）
 function showCount(id) {
@@ -1172,9 +1185,9 @@ $('voice').addEventListener('click', () => {
     stopVoice = listen({
       onResult: (text) => {
         if (run !== voiceRun) return;
-        // 入力欄の上限（200文字）に収める。改行などはここで取り除く
+        // 入力欄の上限（200文字）に収める。改行などはここで取り除く。切るときは絵文字を途中で割らない（clipText）
         const joined = [$('text').value, text].filter(Boolean).join('　').replace(/[\r\n\t]+/g, '');
-        $('text').value = joined.slice(0, 200);
+        $('text').value = clipText(joined, LIMITS.text.max);
         showCount('text');
         say('文字にしました。まちがいがないか見てから、「おくる」を押してください。');
       },
