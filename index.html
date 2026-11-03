@@ -317,9 +317,15 @@
     }
     .note { font-size: 20px; color: var(--shade); margin: var(--gap-2) 0; }
     .msg { min-height: 1.7em; margin: var(--gap-3) 0 0; font-weight: 700; color: var(--shu-text); }
+    /* 注記や案内の文は、対応しているブラウザでは文節のところで改行する（「ブ／ラウザ」のように語の途中で割れにくくなる） */
+    .note, .msg, .label, summary { word-break: auto-phrase; }
 
     /* 画面の読み上げだけに出す文字（見た目には出さない） */
     .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+    /* 語の途中で折れない箱。よびかたや決まった語を入れる（app.js が包む）。
+       箱ごと次の行へ移るので、語が割れない。長すぎて1行に入らない語だけ、箱の中で折る（はみ出さない） */
+    .nw { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
 
     /* 投稿の手順の丸（だれ → お題 → 札 → おくる）。選んだところにチェックが付き、次にやることの丸が目立つ。
        色だけに頼らない: できた = チェックの形、次 = 二重の輪と下線、まだ = 数字だけ */
@@ -676,6 +682,8 @@
     /* 紙の上では濃茶の輪郭が見えるので、暗い画面用の縁取りは外す */
     .screen .post .sprite { filter: none; }
     .screen .post .who { display: flex; align-items: center; gap: var(--gap-3); font-size: 28px; font-weight: 700; color: var(--shade); margin: 0 0 var(--gap-2); }
+    /* 名前の文字は、1つのまとまりとして絵の横に並べる（箱ごとに分かれて並んでしまわないように） */
+    .screen .post .who-text { min-width: 0; overflow-wrap: anywhere; }
     .screen .post .card { font-size: 38px; font-weight: 800; line-height: 1.4; margin: 0; overflow-wrap: anywhere; }
     .screen .post .text { font-size: 32px; line-height: 1.6; margin: var(--gap-2) 0 0; overflow-wrap: anywhere; }
     .screen .fade { position: relative; z-index: 1; animation: fade-in 350ms ease-out; }

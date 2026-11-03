@@ -22,7 +22,10 @@ const CARDS = {
   'どこ行きたい': ['こうえん', 'うみ', 'やま', 'おんせん', 'おまつり', 'おうち'],
   'なに食べたい': ['おすし', 'おにく', 'おさかな', 'めん', 'おかし', 'なべ'],
 };
-const CORNER_TITLES = { 'ひとこと': 'きょうの一言', 'むかし': 'むかし話コーナー', 'つぎ': 'つぎに会う日' };
+// コーナーの題字。語のまとまりごとに分けておく（折れるときは、まとまりの切れ目で折れる）
+const CORNER_TITLES = { 'ひとこと': ['きょうの一言'], 'むかし': ['むかし話', 'コーナー'], 'つぎ': ['つぎに会う日'] };
+// 司会の言葉の中で、途中で折れてほしくない決まった語（よびかたとニックネームは、画面に出すときに足す）
+const FIXED_WORDS = ['ひとこと', 'むかし話', 'コーナー', 'つぎに会う日', '会いたい日', '夜7時', 'かぞくニュース', 'テレ吉'];
 
 const $ = (id) => document.getElementById(id);
 // 要素を作り、文字は textContent で入れる
@@ -31,6 +34,41 @@ function el(tag, text, className) {
   if (text !== undefined) e.textContent = text;
   if (className) e.className = className;
   return e;
+}
+// 語の途中で折れない箱（CSS の .nw）。長すぎて行に入りきらないときだけ、箱の中で折る
+const nw = (text) => el('span', text, 'nw');
+
+// 順に並べた語を、nw の箱に入れて、間に区切りの文字を挟んだものにする（箱の中の文字は、元のまま）
+function nwJoin(parent, parts, separator = '　') {
+  parts.forEach((part, i) => {
+    if (i > 0) parent.append(separator);
+    parent.append(nw(part));
+  });
+}
+
+// 文の中の「折れてほしくない語」（よびかた・ニックネーム・決まった語）を見つけて、nw の箱で包む。
+// 文字そのものは変えず、箱に入れるだけ。1文字の語は、もともと途中で折れないので対象にしない
+function guard(text) {
+  const words = [...roles(), ...state.posts.flatMap((p) => [p.who, p.name ?? '']), ...FIXED_WORDS];
+  // 長い語から先に探す（短い語が、長い語の一部だけを先に取ってしまわないように）
+  const list = [...new Set(words)].filter((w) => w.length >= 2).sort((a, b) => b.length - a.length);
+  const re = new RegExp(list.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
+  const nodes = [];
+  let last = 0;
+  for (const m of text.matchAll(re)) {
+    if (m.index > last) nodes.push(document.createTextNode(text.slice(last, m.index)));
+    nodes.push(nw(m[0]));
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) nodes.push(document.createTextNode(text.slice(last)));
+  return nodes;
+}
+
+// コーナーなどの題字（段落）。語のまとまりごとに nw の箱へ入れる
+function titleLine(units) {
+  const p = el('p', undefined, 'corner');
+  p.append(...units.map(nw));
+  return p;
 }
 
 // 保存データは型を確かめてから使う。読めなければ空から始める
@@ -131,7 +169,8 @@ function pickTopic(v) {
 }
 
 function renderForm() {
-  $('post-title').textContent = `${role}のひとこと`;
+  // 見出し「○○のひとこと」は、よびかたと「のひとこと」を別の箱にして、語の途中で折れないようにする
+  $('post-title').replaceChildren(nw(role), nw('のひとこと'));
   // 「いつ会いたい」のときは、札のかわりに日付をえらぶ
   const askDate = pick.topic === WISH_DATE_TOPIC;
   $('cards-box').hidden = askDate;
@@ -239,14 +278,17 @@ function renderPosts() {
   const list = $('posts');
   list.replaceChildren();
   if (state.posts.length === 0) {
-    list.append(el('li', 'きょうの投稿は、ここにならびます。'));
+    const empty = el('li');
+    empty.append(nw('きょうの投稿は、'), nw('ここに'), nw('ならびます。'));
+    list.append(empty);
   }
   for (const p of state.posts) {
     const li = el('li');
     const body = el('span', undefined, 'body');
     const wish = p.wishDate ? monthDay(p.wishDate) : '';
-    const parts = [p.animal ? `【${p.animal}】` : '', p.who, p.topic, p.card, wish, p.headline, p.text].filter(Boolean);
-    body.textContent = parts.join('　');
+    // 選んだ言葉は、語の途中で折れない箱に入れる。本人が書いたひとことは、そのまま流す
+    nwJoin(body, [p.animal ? `【${p.animal}】` : '', p.who, p.topic, p.card, wish, p.headline].filter(Boolean));
+    if (p.text) body.append('　', p.text);
     const del = el('button', '消す');
     del.type = 'button';
     // 「消す」が何件も並ぶので、読み上げでどの投稿か分かるように名前を付ける
@@ -401,10 +443,16 @@ function daysSuffix(dateText) {
   return left === 0 ? '（きょうです）' : `（あと${left}日）`;
 }
 
-// 「つぎに会う日」の1行
+// 「つぎに会う日」の1行（画面に出す段落）。日付と日数は、それぞれ途中で折れない箱に入れる
 function meetLine(dateText) {
-  if (!dateText) return 'つぎに会う日は、決まったらここに出ます。';
-  return `つぎに会う日：${monthDay(dateText)}${daysSuffix(dateText)}`;
+  const p = el('p', undefined, 'meet');
+  if (!dateText) {
+    p.append(...guard('つぎに会う日は、決まったらここに出ます。'));
+    return p;
+  }
+  const suffix = daysSuffix(dateText);
+  nwJoin(p, ['つぎに会う日：', monthDay(dateText), ...(suffix ? [suffix] : [])], '');
+  return p;
 }
 
 // 番組を、画面に映す順番の一覧にする。本文は投稿のほうから取り、Claude の返事からは取らない
@@ -421,7 +469,8 @@ function buildSteps(news, posts, nextDate) {
 function hostLine(text) {
   const row = el('div', undefined, 'host-row');
   const bubble = el('p', undefined, 'host');
-  bubble.append(el('span', 'AI', 'ai-chip'), document.createTextNode(text));
+  // 文字は元のまま。よびかたなどの語だけ、途中で折れない箱に入れる
+  bubble.append(el('span', 'AI', 'ai-chip'), ...guard(text));
   row.append(spriteCanvas('テレ吉', 4, undefined, { shadow: true }), bubble);
   return row;
 }
@@ -440,24 +489,28 @@ function renderStep(still = false) {
   const step = show.steps[show.index];
   const wrap = el('div', undefined, still ? 'fade still' : 'fade');
   if (step.kind === 'segment') {
-    wrap.append(el('p', CORNER_TITLES[step.corner] ?? '', 'corner'), hostLine(step.host));
-    if (step.corner === 'つぎ') wrap.append(el('p', meetLine(step.nextDate), 'meet'));
+    wrap.append(titleLine(CORNER_TITLES[step.corner] ?? []), hostLine(step.host));
+    if (step.corner === 'つぎ') wrap.append(meetLine(step.nextDate));
     const p = step.post;
     const box = el('div', undefined, 'post');
-    const name = p.name ? `${p.who}（${p.name}）` : p.who;
-    const who = el('p', p.animal ? `【${p.animal}】${name}` : name, 'who');
-    // 投稿した人の動物を、名前の左に出す（飾り）
-    if (p.animal) who.prepend(spriteCanvas(p.animal, 3, undefined, { shadow: true }));
+    // 名前の行。動物の絵（飾り）の右に、動物・よびかた・ニックネームを、それぞれ途中で折れない箱に入れて並べる
+    const who = el('p', undefined, 'who');
+    if (p.animal) who.append(spriteCanvas(p.animal, 3, undefined, { shadow: true }));
+    const whoText = el('span', undefined, 'who-text');
+    nwJoin(whoText, [p.animal ? `【${p.animal}】` : '', p.who, p.name ? `（${p.name}）` : ''].filter(Boolean), '');
+    who.append(whoText);
     box.append(who);
     // つぎに会う日の希望は「なにしたい　おでかけ」のように、お題と札を並べて出す
     // 「いつ会いたい」は、札のかわりに日付と、あと何日かを出す
     const wish = p.wishDate ? `${monthDay(p.wishDate)}${daysSuffix(p.wishDate)}` : p.card;
     const cardLine = NEXT_TOPICS.includes(p.topic) ? [p.topic, wish] : [p.card];
-    box.append(el('p', [...cardLine, p.headline].filter(Boolean).join('　'), 'card'));
+    const card = el('p', undefined, 'card');
+    nwJoin(card, [...cardLine, p.headline].filter(Boolean));
+    box.append(card);
     if (p.text) box.append(el('p', p.text, 'text'));
     wrap.append(box);
   } else {
-    wrap.append(el('p', step.kind === 'opening' ? '夜7時のかぞくニュース' : 'おしまい', 'corner'), hostLine(step.host));
+    wrap.append(titleLine(step.kind === 'opening' ? ['夜7時の', 'かぞくニュース'] : ['おしまい']), hostLine(step.host));
   }
   setScreen(wrap);
   updateNext();
@@ -499,7 +552,7 @@ function showError(message) {
   show = { steps: [{ kind: 'closing', host: message }], index: 0 };
   // アプリ自身のお知らせなので、AI の吹き出し（host）にはしない
   const wrap = el('div', undefined, 'fade');
-  wrap.append(el('p', '番組を作れませんでした', 'corner'), el('p', message, 'notice'));
+  wrap.append(titleLine(['番組を', '作れませんでした']), el('p', message, 'notice'));
   setScreen(wrap);
   $('next').hidden = true;
 }
