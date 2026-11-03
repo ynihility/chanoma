@@ -26,7 +26,7 @@ Tests: `node --test` (unit tests for the validation code).
 
 ## What Claude does
 
-`POST /api/news` sends the posts to Claude (model `claude-opus-5-5`) as data inside `<posts>` tags. Claude only **orders** the posts into corners and writes the host's lead-in lines, returned as JSON that refers to posts by ID. It never rewrites anyone's words. The server and the browser both validate the reply (types, lengths, IDs, banned words, names that are not in the posts), and the screen shows the original posts, not text from Claude. Lead-in lines are labelled "AI" on screen.
+`POST /api/news` sends the posts to Claude (model `claude-opus-5-5`) as data inside `<posts>` tags. Claude only **orders** the posts into corners and writes the host's lead-in lines, returned as JSON that refers to posts by ID. It never rewrites anyone's words. The server and the browser both validate the reply (types, lengths, IDs, banned words, names that are not in the posts), and the screen shows the original posts, not text from Claude. Lead-in lines are shown as the host character "Telekichi", and a note under the TV always says that Telekichi's words are written by AI (Claude); screen readers read the label as "Telekichi (words written by AI)".
 
 ## Third-party materials
 
@@ -76,7 +76,7 @@ Node.js（v24 で確認）と、Anthropic の API キーが必要です。npm �
 
 ## Claude の役割
 
-`POST /api/news` が、投稿を `<posts>` で囲んだ「データ」として Claude（`claude-opus-5-5`）に渡します。Claude がするのは、投稿をコーナーに**並べる**ことと、司会のつなぎの言葉を書くことだけです。返事は、投稿をIDで指す JSON で、誰かの言葉を書き換えることはありません。返事は、サーバーとブラウザの両方で検査します（型、長さ、ID、禁止された言葉、投稿にない名前など）。画面に出す本文は、Claude の返事ではなく、元の投稿です。つなぎの言葉には、画面で「AI」と表示します。
+`POST /api/news` が、投稿を `<posts>` で囲んだ「データ」として Claude（`claude-opus-5-5`）に渡します。Claude がするのは、投稿をコーナーに**並べる**ことと、司会のつなぎの言葉を書くことだけです。返事は、投稿をIDで指す JSON で、誰かの言葉を書き換えることはありません。返事は、サーバーとブラウザの両方で検査します（型、長さ、ID、禁止された言葉、投稿にない名前など）。画面に出す本文は、Claude の返事ではなく、元の投稿です。つなぎの言葉は、司会「テレ吉」の札で示し、テレ吉の言葉を AI（Claude）が考えていることを、テレビの下の注記で常に示します（画面の読み上げでは「テレ吉（AI が考えた言葉）」と読みます）。
 
 ## 外部の素材
 
