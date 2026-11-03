@@ -25,7 +25,7 @@ const CARDS = {
 // コーナーの題字。語のまとまりごとに分けておく（折れるときは、まとまりの切れ目で折れる）
 const CORNER_TITLES = { 'ひとこと': ['きょうの一言'], 'むかし': ['むかし話', 'コーナー'], 'つぎ': ['つぎに会う日'] };
 // 司会の言葉の中で、途中で折れてほしくない決まった語（よびかたとニックネームは、画面に出すときに足す）
-const FIXED_WORDS = ['ひとこと', 'むかし話', 'コーナー', 'つぎに会う日', '会いたい日', '夜7時', 'かぞくニュース', 'テレ吉'];
+const FIXED_WORDS = ['ひとこと', 'むかし話', 'コーナー', 'つぎに会う日', '会いたい日', '夜7時', 'かぞくニュース', 'テレ吉', 'もう一度'];
 
 const $ = (id) => document.getElementById(id);
 // 要素を作り、文字は textContent で入れる
@@ -564,15 +564,29 @@ function goStep(from) {
   wipeTo(cornerKey(from) === cornerKey(show.steps[show.index]) ? 'snow' : 'mosaic', renderStep);
 }
 
+// うまく作れなかった画面。見出し（何が起きたか）と本文（理由・投稿が無事なこと・次にすること）を分けて出す。
+// サーバーの文の頭が見出しと同じ言葉のときは、重ねて出さない
+const FAIL_HEAD = '番組を作れませんでした。';
 function showError(message) {
   play('error');
   setView(true);
   show = { steps: [{ kind: 'closing', host: message }], index: 0 };
+  const reason = message.startsWith(FAIL_HEAD) ? message.slice(FAIL_HEAD.length) : message;
   // アプリ自身のお知らせなので、AI の吹き出し（host）にはしない
   const wrap = el('div', undefined, 'fade');
-  wrap.append(titleLine(['番組を', '作れませんでした']), el('p', message, 'notice'));
+  wrap.append(titleLine(['番組を', '作れませんでした']));
+  if (reason) {
+    const why = el('p', undefined, 'notice');
+    why.append(...guard(reason));
+    wrap.append(why);
+  }
+  const next = el('p', undefined, 'notice');
+  nwJoin(next, ['投稿は', '消えていません。', '「もう一度つくる」', 'を押してください。'], '');
+  wrap.append(next);
   setScreen(wrap);
   $('next').hidden = true;
+  // 押すと、いまの投稿で、もう一度番組を頼む（回数の上限はサーバーが見ている）
+  $('retry').hidden = false;
 }
 
 // 番組を待つあいだの画面（試験放送の色の帯と、テレ吉の札）。待ちが長いときは、一言を替える
@@ -581,6 +595,7 @@ const WAIT_NOTE_LONG = 'すこし時間がかかっています。もうしば�
 function showWaiting() {
   show = { steps: [], index: 0 };
   $('next').hidden = true;
+  $('retry').hidden = true;
   setView(true);
   play('tvon');
   const bars = el('div', undefined, 'bars');
@@ -622,6 +637,7 @@ function watch(r, fromWaiting) {
   ready = null;
   show = { steps: r.steps, index: 0 };
   $('next').hidden = false;
+  $('retry').hidden = true;
   updateNext();
   if (fromWaiting) {
     play('next');
@@ -729,6 +745,7 @@ $('clear').addEventListener('click', () => {
   renderPosts();
 });
 $('evening').addEventListener('click', goEvening);
+$('retry').addEventListener('click', goEvening);
 $('next').addEventListener('click', () => {
   // 演出の途中で押されたら、演出だけを終わらせて、いまの場面をすぐ見せる（場面は飛ばさない）
   if (run) {

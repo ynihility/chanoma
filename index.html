@@ -640,7 +640,7 @@
     .screen .host::before { top: 22px; left: -28px; border-width: 12px; border-right-color: var(--crt-light); }
     .screen .host::after { top: 24px; left: -20px; border-width: 10px; border-right-color: #1F4538; }
     /* アプリ自身のお知らせ（番組を作れなかったときなど）。AI の言葉ではないので、吹き出しにはしない */
-    .screen .notice { font-size: 28px; line-height: 1.6; margin: 0 0 var(--gap-5); overflow-wrap: anywhere; }
+    .screen .notice { font-size: 28px; line-height: 1.6; margin: 0 0 var(--gap-5); overflow-wrap: anywhere; word-break: auto-phrase; }
     /* 暗い画面では濃茶の輪郭が沈むので、絵のまわりに淡い縁取りを付ける */
     .screen .sprite {
       filter: drop-shadow(1px 0 0 var(--crt-light)) drop-shadow(-1px 0 0 var(--crt-light))
@@ -1038,6 +1038,7 @@
         </div>
         <div class="row">
           <button id="next" class="primary">つぎへ</button>
+          <button id="retry" class="primary" hidden>もう一度つくる</button>
           <button id="back">投稿にもどる</button>
         </div>
       </div>
