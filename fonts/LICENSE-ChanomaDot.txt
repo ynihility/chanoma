@@ -1,7 +1,7 @@
 ChanomaDot (ChanomaDot-Regular.ttf)
 Copyright (c) 2026 ynihility. All rights reserved.
 
-ChanomaDot is a dot-style typeface that ynihility drew by hand in 2026
+ChanomaDot is a dot-style typeface that ynihility made with Claude Code (AI) in 2026
 for the title lettering of "Chanoma" (ちゃのま).
 
 It is included in this repository only so that Chanoma can display its titles.
@@ -18,7 +18,7 @@ Not permitted without the author's written permission:
 ChanomaDot（ChanomaDot-Regular.ttf）
 Copyright (c) 2026 ynihility. All rights reserved.
 
-ChanomaDot は、ynihility が 2026 年に手で描いた、ドット風の書体です。
+ChanomaDot は、ynihility が 2026 年に Claude Code（AI）と一緒に作った、ドット風の書体です。
 「ちゃのま」の題字を表示するために作りました。
 
 このアプリ（ちゃのま）が題字を表示するためだけに、このリポジトリに同梱しています。

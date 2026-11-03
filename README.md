@@ -8,7 +8,7 @@ Built for *Built with Claude: Japan 2026*. All code, pixel art and sound effects
 
 A family connects through a **room**. Everyone opens the same room on their own phone or PC, posts there, and watches the same program at 7 p.m.
 
-- **Create or join.** Press "部屋に入る (join a room)", then "新しく部屋を作る (create a new room)", or type a room code by hand. The server makes the code: 22 random letters and digits (128 bits). It works like a key, so share it only with your family. One IP address can create 5 rooms a day.
+- **Create or join.** Press "部屋に入る (join a room)", then "新しく部屋を作る (create a new room)", or type a room code yourself. The server makes the code: 22 random letters and digits (about 131 bits). It works like a key, so share it only with your family. One IP address can create 5 rooms a day.
 - **Invite link.** Once you are in a room, "家族に送る (send to family)" opens the phone's share sheet (or copies the link). The link looks like `https://<your-host>/#r=<room code>`. Send it to your family by chat. If someone opens a link for a different room, the app asks before switching, and keeps the old room's posts and shelf on that device.
 - **Posts.** Posts go to the room (up to 30 a day per room). If the server cannot be reached, the post stays on the device and is sent the next time the app is opened. While the screen is visible, the app checks for new posts every 20 seconds. The screen shows only "n posts today". It never shows who has read or who has not.
 - **7 p.m.** Anyone can press "make it 7 p.m." and the server makes the program from the room's posts of that day. If the program already exists, everyone gets the same one, and Claude is not called twice. Posts that arrive after the program was made are listed below the TV as "words that arrived after the program".
@@ -17,7 +17,7 @@ A family connects through a **room**. Everyone opens the same room on their own 
 
 ## How to try it
 
-You need Node.js 20 or later (`AbortSignal.any` is used; tested with v24). There are no npm dependencies.
+You need Node.js 20.19 or later (`AbortSignal.any` is used; tested with v24 only). There are no npm dependencies.
 
 ### On your own computer
 
@@ -59,9 +59,12 @@ The public form serves the app and the room API only. It does **not** serve the 
 | `CHANOMA_PUBLIC` | `1` (listen on `0.0.0.0`, rooms only) |
 | `CHANOMA_ORIGIN` | the public address of the app, for example `https://your-service.onrender.com`. The server refuses to start without it (it is used to allow only requests from that origin) |
 | `PORT` | given by the host. The default is 8787 |
+| `CHANOMA_TRUSTED_HOPS` | optional, default 1. Which value of `X-Forwarded-For`, counted from the right, is taken as the client IP: the number of proxies in front of the server. Used only in the public form |
+| `CHANOMA_ROOMS_PER_HOUR` | optional, default 20. How many rooms the whole server may create in an hour, whatever the IP. Above that, creating a room returns 429 |
+| `CHANOMA_LOG_XFF` | optional, not set by default. When set to `1`, the server logs how many values `X-Forwarded-For` has, for the first 5 requests only (the IP values themselves are not logged). For checking the hop count |
 | `ANTHROPIC_API_KEY` | type it yourself into the host's environment-variable screen. Do not put it in the repository or give it to a tool |
 
-Behind a proxy, the server takes the client IP for its rate limits from the first value of `X-Forwarded-For`.
+Behind a proxy, the server takes the client IP for its per-IP limits from `X-Forwarded-For`, counting `CHANOMA_TRUSTED_HOPS` values from the right (default 1; set it to the number of proxies in front of the server). Values a client prepends to that header are ignored, but if the hop count is wrong the per-IP limits (5 rooms a day, 60 reads and 60 writes a minute) can be bypassed or shared, so treat them as a guide. The caps that protect the cost do not depend on the IP: the shared program limits (10 a minute, 100 a day, 3 at once, 3 tries per room per day) and the server-wide room-creation limit (`CHANOMA_ROOMS_PER_HOUR`, default 20 an hour).
 
 Tests: `node --test`.
 
@@ -91,9 +94,9 @@ your device  ->  the Chanoma server  ->  Anthropic API (Claude)
 | Chanoma server -> Anthropic | the day's posts of the room, wrapped in `<posts>`, only when a program is made | the room code, the device key |
 
 - **Voice input** is optional and only a helper: you check the text before sending. The app shows: 「声は保存しません。音声認識はブラウザの機能で、提供元のサーバーに送られる場合があります。整えるために話の文章はClaudeに送ります。」 The speech recognition is the browser's own feature, and the browser's provider may receive the voice.
-- **Posts** are kept on the server only for that day. They are deleted the next morning at 4:00 JST. They stay on the device that wrote them.
-- **Programs** stay on the server until the room has not been used for 3 days, and can come back from a family member's device through the shelf. If every device has deleted a program and the server has forgotten it, it is gone.
-- **At Anthropic**: according to Anthropic's published documentation (retrieved 2026-11-03; <https://platform.claude.com/docs/en/manage-claude/api-and-data-retention>), API inputs and outputs are deleted after 30 days by default. This project does **not** use zero data retention (ZDR).
+- **Posts** are served by the server only for that day. From 4:00 JST the next morning they are no longer shown, and the server removes them from memory within the following hour. They stay on the device that wrote them.
+- **Programs** include a copy of that day's posts (text, cards, how each person is called, nickname, animal, wish date). A program stays on the server until the room has not been used for 3 days (each room keeps up to 30 programs; the oldest is dropped first), and can come back from a family member's device through the shelf. So the words in a program stay on the server as long as the room is in use. If every device has deleted a program and the server has forgotten it, it is gone.
+- **At Anthropic**: the server sends the posts to the Claude API with the model `claude-opus-5-5`. Anthropic's API documentation (retrieved 2026-11-04; <https://platform.claude.com/docs/en/manage-claude/api-and-data-retention>) states that conversation content (prompts and Claude's outputs) is not retained by default, with the exception of "Covered Models" (Claude Fable 5.1, Mythos 5.1, Fable 5 and Mythos 5), which require 30-day retention; `claude-opus-5-5` is not on that list. Anthropic's commercial data retention policy (dated 2026-07-01, retrieved 2026-11-04; <https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data>) states that API inputs and outputs are automatically deleted from its backend within 30 days, and that content flagged by its automated trust-and-safety systems as a Usage Policy violation may be retained for up to 2 years. This project does **not** use zero data retention (ZDR). The request also enables Anthropic's server-side fallback (`fallbacks: "default"`): only if Claude Opus 5.5 declines the request on safety grounds, the API retries it once on another Claude model that Anthropic recommends for that case. Which model that is, is not published by Anthropic, and we have not verified it; the server does not record which model answered.
 - **Purpose**: the posts are used only to make the program. They are not used for anything else, and there are no rankings, ads or public pages.
 - **Server location**: if you host on Render, the server runs outside Japan (Singapore), and the hosting company may keep access logs. The Chanoma server logs only the first 4 letters of a room code and never the posts.
 
@@ -115,21 +118,24 @@ These are known and not fixed. They are listed so that you can decide whether Ch
 - **Plain `http` (for example on a home Wi-Fi) is not protected.** The device key then travels in plain text. Use `https` for anything other than trying it out on your own network.
 - **A late reply can land in the wrong shelf.** Right after you switch rooms, a delayed reply from the previous room can be saved into the new room's shelf.
 - **The free host may sleep.** The server keeps rooms in memory. If the host stops it, the server forgets, and the devices bring the programs back later.
+- **Per-IP limits are a guide.** The client IP comes from `X-Forwarded-For`, so it depends on the proxy setup (see above). The cost caps do not depend on it.
+- **A program keeps the day's posts.** The posts' text is deleted from the server the next morning, but the program made from them keeps a copy for as long as the room is used (see "Where your data goes").
+- **Memory on a free host is not measured.** With 100 rooms × 30 programs the server was measured at about 285 MB; whether the host's free tier allows that is not verified.
 
 ## Third-party materials
 
 | Item | Details |
 |---|---|
-| **ChanomaDot** (title lettering) | Made by the author, ynihility, during the event period. A 12×16 dot typeface with 51 characters, used only for the app name and the headings on the TV. **Not licensed for reuse** (see `fonts/LICENSE-ChanomaDot.txt`). File `fonts/ChanomaDot-Regular.ttf` (15,644 bytes). SHA-256 `5a0462f27872e3d72c451ea49ea86d4646bd9ef269674f0b1e0fb5b050ea6f53` |
+| **ChanomaDot** (title lettering) | Made by ynihility with Claude Code (AI) during the event period. A 12×16 dot typeface with 51 characters, used only for the app name and the headings on the TV. **Not licensed for reuse** (see `fonts/LICENSE-ChanomaDot.txt`). File `fonts/ChanomaDot-Regular.ttf` (15,644 bytes). SHA-256 `5a0462f27872e3d72c451ea49ea86d4646bd9ef269674f0b1e0fb5b050ea6f53` |
 | **Reggae One** (other headings) | Copyright 2020 The Reggae Project Authors (<https://github.com/fontworks-fonts/Reggae>). SIL Open Font License 1.1. File `fonts/ReggaeOne-Regular.ttf`, unmodified. Source: <https://github.com/google/fonts/tree/main/ofl/reggaeone> at commit `8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5`. SHA-256 `aebe62598732d76036f30ec11bb0ec5f68938e373a06d1b4ceb6b9cf1abf3db2`. License text: `fonts/OFL-ReggaeOne.txt` |
 | **DotGothic16** (dot-style text) | Copyright 2020 The DotGothic16 Project Authors (<https://github.com/fontworks-fonts/DotGothic16>). SIL Open Font License 1.1. File `fonts/DotGothic16-Regular.ttf`, unmodified. Source: <https://github.com/google/fonts/tree/main/ofl/dotgothic16> at commit `9a6cc6b8ce992aff77b69c857c46af0b42cdff76`. SHA-256 `3ad9af88726d42b40f7f365f0dcac785af73cf20ea6f1d5b44e57cc21150b8f1`. License text: `fonts/OFL-DotGothic16.txt` |
 | Body text | Fonts already installed on the user's device (none are bundled). |
 | Claude API | The server calls the Anthropic API to make programs. |
 | Browser speech recognition | Optional voice input uses the browser's Web Speech API. |
 
-ChanomaDot is the author's own work, so it is not a third-party material, but it is listed here because it is a bundled font. Reggae One is used for the headings that contain characters ChanomaDot does not have.
+ChanomaDot was made for this project (with Claude Code), so it is not a third-party material, but it is listed here because it is a bundled font. Reggae One is used for the headings that contain characters ChanomaDot does not have.
 
-There are no other external libraries, data, images or audio files. All pixel art is drawn in code from text maps (`sprites.js`), and all sound effects are synthesized with the Web Audio API (`sound.js`). The scene transitions are drawn on a canvas in code (`effects.js`) and the waiting screen is built with CSS; neither uses an external effect library, image or sound.
+There are no other external libraries, data, images or audio files. All pixel art is drawn in code from text maps (`sprites.js`), and all sound effects are synthesized with the Web Audio API (`sound.js`). The short beeps that play along with Tele-kichi's lines (his cue sounds) are electronic tones made the same way; they are not a voice, and no audio files or speech synthesis are used. The scene transitions are drawn on a canvas in code (`effects.js`) and the waiting screen is built with CSS; neither uses an external effect library, image or sound.
 
 ## License
 
@@ -159,7 +165,7 @@ No read receipts, no nagging, no rankings, nothing public, and no health or lone
 
 家族は「部屋」でつながります。みんなが、自分のスマホやパソコンで同じ部屋を開き、そこに投稿し、夜7時に同じ番組を見ます。
 
-- **作る・入る。** 「部屋に入る」を押し、「新しく部屋を作る」で作るか、部屋のコードを手で入力して入ります。コードはサーバーが作る、英数字22字の乱数（128ビット）です。鍵の代わりなので、家族だけに伝えてください。1つの IP アドレスから作れる部屋は、1日5つまでです。
+- **作る・入る。** 「部屋に入る」を押し、「新しく部屋を作る」で作るか、部屋のコードを手で入力して入ります。コードはサーバーが作る、英数字22字の乱数（約131ビット）です。鍵の代わりなので、家族だけに伝えてください。1つの IP アドレスから作れる部屋は、1日5つまでです。
 - **招待リンク。** 部屋に入ると出てくる「家族に送る」を押すと、スマホの共有画面が開きます（なければ、リンクをコピーします）。リンクは `https://<置き場所>/#r=<部屋のコード>` の形です。LINE などで家族に送ってください。別の部屋のリンクを開いたときは、切り替える前に確かめます。いまの部屋の投稿と本棚は、その端末に残ります。
 - **投稿。** 投稿は部屋に送られます（1部屋1日30件まで）。サーバーに届かないときは、端末に残しておき、次に開いたときに送ります。画面が見えているあいだは、20秒ごとに新しい投稿を取りに行きます。画面に出るのは「きょうの投稿 n 件」だけです。だれが読んだか、だれがまだかは出しません。
 - **夜7時。** だれかが「夜7時にする」を押すと、サーバーが、その日の部屋の投稿から番組を作ります。番組がすでにあれば、全員が同じ番組を受け取り、Claude は二重に呼ばれません。番組を作ったあとに届いた投稿は、テレビの下に「番組のあとに届いた一言」として並びます。
@@ -168,7 +174,7 @@ No read receipts, no nagging, no rankings, nothing public, and no health or lone
 
 ## 試しかた
 
-Node.js 20 以上が必要です（`AbortSignal.any` を使うため。確認したのは v24）。npm のパッケージは使っていません。
+Node.js 20.19 以上が必要です（`AbortSignal.any` を使うため。確認したのは v24 だけです）。npm のパッケージは使っていません。
 
 ### 自分のパソコンで
 
@@ -210,9 +216,12 @@ Node.js 20 以上が必要です（`AbortSignal.any` を使うため。確認し
 | `CHANOMA_PUBLIC` | `1`（`0.0.0.0` で待ち受け、部屋だけを出す） |
 | `CHANOMA_ORIGIN` | アプリの公開アドレス。例: `https://your-service.onrender.com`。ないと起動しません（このアドレスからの要求だけを許すために使います） |
 | `PORT` | 置き場所が渡します。既定は 8787 |
+| `CHANOMA_TRUSTED_HOPS` | 任意。既定 1。`X-Forwarded-For` の右から何番目の値を、送り元の IP とするか。サーバーの前にある中継の段数です。公開の形のときだけ効きます |
+| `CHANOMA_ROOMS_PER_HOUR` | 任意。既定 20。サーバー全体で、1時間に作れる部屋の数です。IP に頼りません。超えると、部屋を作る要求は 429 を返します |
+| `CHANOMA_LOG_XFF` | 任意。ふだんは設定しません。`1` にすると、最初の5リクエストだけ、`X-Forwarded-For` の値の数を記録します（IP の値は記録しません）。段数の確認用です |
 | `ANTHROPIC_API_KEY` | 置き場所の環境変数の画面に、自分で入力します。リポジトリに入れたり、道具に渡したりしないでください |
 
-プロキシの後ろでは、回数の上限に使うクライアントの IP を、`X-Forwarded-For` の先頭の値から取ります。
+プロキシの後ろでは、IP ごとの上限に使うクライアントの IP を、`X-Forwarded-For` の右から `CHANOMA_TRUSTED_HOPS` 番目（既定 1。サーバーの前にある中継の数を入れます）から取ります。送る側がこのヘッダーの先頭に足した値は無視しますが、段数の設定が違うと IP ごとの上限（1日5部屋、1分60回の読み書き）は回避や共有が起こりうるので、目安と考えてください。費用を守る上限は IP に頼りません。全体の番組の枠（1分10回、1日100回、同時3つ、部屋ごと1日3回）と、サーバー全体の部屋作成の上限（`CHANOMA_ROOMS_PER_HOUR`、既定1時間20室）です。
 
 テスト：`node --test`
 
@@ -242,9 +251,9 @@ Node.js 20 以上が必要です（`AbortSignal.any` を使うため。確認し
 | ちゃのまのサーバー -> Anthropic | 番組を作るときだけ、その日の部屋の投稿（`<posts>` で囲む） | 部屋のコード、端末の鍵 |
 
 - **音声入力**は、任意の補助です。送る前に、必ず文字で確かめます。アプリには「声は保存しません。音声認識はブラウザの機能で、提供元のサーバーに送られる場合があります。整えるために話の文章はClaudeに送ります。」と出します。音声認識はブラウザ自身の機能で、声はブラウザの提供元が受け取ることがあります。
-- **投稿**は、サーバーにはその日の分だけ置き、翌朝4:00（日本時間）に消します。書いた端末には残ります。
-- **番組**は、部屋が3日使われないまで、サーバーに残ります。家族の端末から、本棚を通して戻ることもあります。すべての端末から消え、サーバーも忘れたら、その番組はなくなります。
-- **Anthropic では**、Anthropic の公式の説明（2026年11月3日に取得。<https://platform.claude.com/docs/en/manage-claude/api-and-data-retention>）によると、API の入力と出力は、既定で30日後に削除されます。このプロジェクトは、ゼロデータ保持（ZDR）では**ありません**。
+- **投稿**は、サーバーがその日のあいだだけ返します。翌朝4:00（日本時間）からは画面に出なくなり、サーバーのメモリからは、そのあと1時間以内に消します。書いた端末には残ります。
+- **番組**には、その日の投稿の写し（文、札、よびかた、ニックネーム、動物、会いたい日）が入ります。番組は、部屋が3日使われないまでサーバーに残り（1部屋30本まで。古いものから消えます）、家族の端末から本棚を通して戻ることもあります。つまり、番組になった投稿の文は、部屋が使われているあいだサーバーに残ります。すべての端末から消え、サーバーも忘れたら、その番組はなくなります。
+- **Anthropic では**：サーバーは投稿を、モデル `claude-opus-5-5` を指定して Claude API に送ります。Anthropic の API の説明（2026年11月4日に取得。<https://platform.claude.com/docs/en/manage-claude/api-and-data-retention>）では、会話の内容（入力と Claude の出力）は既定では保存されない、ただし「Covered Models」（Claude Fable 5.1、Mythos 5.1、Fable 5、Mythos 5）は30日の保持が必要、とされています。`claude-opus-5-5` はこの一覧にありません。Anthropic の商用データ保持の方針（2026年7月1日の日付。2026年11月4日に取得。<https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data>）では、API の入力と出力は受け取りから30日以内に自動で削除される、ただし自動の安全の仕組みが利用規約違反と判定したものは最長2年保持されることがある、とされています。このプロジェクトは、ゼロデータ保持（ZDR）では**ありません**。また、Anthropic のサーバー側フォールバック（`fallbacks: "default"`）を有効にしています。Claude Opus 5.5 が安全上の理由で断ったときだけ、Anthropic が推奨する別の Claude モデルで1回やり直されます。どのモデルかは Anthropic が公開しておらず、確かめていません。答えたモデルの名前は、サーバーの記録に残していません。
 - **利用の目的**：投稿は、番組を作ることだけに使います。ほかの目的には使いません。ランキング、広告、公開のページはありません。
 - **サーバーの場所**：Render に置くと、サーバーは日本の外（シンガポール）にあり、運営側にアクセスの記録が残ることがあります。ちゃのまのサーバーは、記録に部屋のコードの先頭4字だけを出し、投稿の文は出しません。
 
@@ -266,10 +275,13 @@ Node.js 20 以上が必要です（`AbortSignal.any` を使うため。確認し
 - **`http`（家の Wi-Fi など）では守られません。** 端末の鍵が、そのまま（平文で）流れます。自分のネットワークで試すとき以外は、`https` を使ってください。
 - **部屋を切り替えた直後の遅れた返事が、新しい部屋の本棚に入ることがあります。**
 - **無料の置き場所は、止まることがあります。** サーバーは部屋をメモリに置いています。置き場所がサーバーを止めると、サーバーは忘れ、番組はあとで端末から戻ります。
+- **IP ごとの上限は目安です。** クライアントの IP は `X-Forwarded-For` から取るので、中継の設定に依存します（上の説明）。費用の上限は IP に頼りません。
+- **番組には、その日の投稿の写しが残ります。** 投稿の文は翌朝サーバーから消えますが、それから作った番組は、部屋が使われるあいだ写しを持ちます（「データの行き先」を参照）。
+- **無料の置き場所のメモリは測っていません。** 100部屋×30本で約285MBと測定しました。置き場所の無料枠で足りるかは未確認です。
 
 ## 外部の素材
 
-上の英語の表のとおりです。同梱したフォントは3つです。ChanomaDot は作者の自作で、再利用は許可していません（ライセンスは `fonts/LICENSE-ChanomaDot.txt`）。Reggae One と DotGothic16 は、SIL Open Font License 1.1 で、加工せず、配布元のファイルのまま配っています。ライセンス全文は `fonts/` に置いています。Reggae One は、ChanomaDot にない字を含む見出しに使っています。本文のフォントは端末にあるものを使うだけで、同梱していません。外部のライブラリ、データ、画像、音声ファイルはありません。ドット絵は `sprites.js` の文字の地図からコードで描き、効果音は Web Audio API で合成しています。場面の切り替えの演出は canvas（`effects.js`）、待ち画面は CSS で、どちらもコードから作っています。外部の演出ライブラリ・画像・音声は使っていません。
+上の英語の表のとおりです。同梱したフォントは3つです。ChanomaDot は、ynihility がこのプロジェクトのために Claude Code（AI）と一緒に作ったもので、再利用は許可していません（ライセンスは `fonts/LICENSE-ChanomaDot.txt`）。Reggae One と DotGothic16 は、SIL Open Font License 1.1 で、加工せず、配布元のファイルのまま配っています。ライセンス全文は `fonts/` に置いています。Reggae One は、ChanomaDot にない字を含む見出しに使っています。本文のフォントは端末にあるものを使うだけで、同梱していません。外部のライブラリ、データ、画像、音声ファイルはありません。ドット絵は `sprites.js` の文字の地図からコードで描き、効果音は Web Audio API で合成しています。テレ吉の言葉に合わせて鳴る短い音（合図の音）も、同じ方法で作った電子音です。声ではなく、音声ファイルや音声合成は使っていません。場面の切り替えの演出は canvas（`effects.js`）、待ち画面は CSS で、どちらもコードから作っています。外部の演出ライブラリ・画像・音声は使っていません。
 
 ## ライセンス
 
