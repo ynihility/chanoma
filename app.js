@@ -512,7 +512,9 @@ function submitPost() {
     say('今日より前の日にちは、えらべません。');
     return;
   }
-  if (state.posts.length >= MAX_POSTS) {
+  // 部屋では、一覧に見えている自分の投稿だけを数える（ほかの部屋や、入る前の投稿は見えず、消せないため）
+  const shown = roomOn() ? state.posts.filter((p) => rc.isMine(p.id)).length : state.posts.length;
+  if (shown >= MAX_POSTS) {
     play('error');
     say(`投稿は${MAX_POSTS}件までです。いらない投稿を消してください。`);
     return;
@@ -919,9 +921,10 @@ function goStep(from) {
 }
 
 // うまく作れなかった画面。見出し（何が起きたか）と本文（理由・投稿が無事なこと・次にすること）を分けて出す。
-// サーバーの文の頭が見出しと同じ言葉のときは、重ねて出さない
+// サーバーの文の頭が見出しと同じ言葉のときは、重ねて出さない。
+// retry が false のときは、「もう一度つくる」では直らない失敗（部屋が無い、きょうの上限）なので、押すよう促さず、ボタンも出さない
 const FAIL_HEAD = '番組を作れませんでした。';
-function showError(message) {
+function showError(message, { retry = true } = {}) {
   play('error');
   setView(true);
   show = { steps: [{ kind: 'closing', host: message }], index: 0 };
@@ -937,9 +940,11 @@ function showError(message) {
     why.append(...guard(reason));
     wrap.append(why);
   }
-  const next = el('p', undefined, 'notice');
-  nwJoin(next, ['投稿は', '消えていません。', '「もう一度つくる」', 'を押してください。'], '');
-  wrap.append(next);
+  if (retry) {
+    const next = el('p', undefined, 'notice');
+    nwJoin(next, ['投稿は', '消えていません。', '「もう一度つくる」', 'を押してください。'], '');
+    wrap.append(next);
+  }
   // 番組が作れなくても、番組の流れを見られるように、見本の番組への入口を出す。自動では流さず、押したときだけ流す。
   // 下の帯（「もう一度つくる」「投稿にもどる」）には足さず、画面の中に置く
   const alt = el('p', undefined, 'notice');
@@ -961,7 +966,7 @@ function showError(message) {
   setScreen(wrap);
   $('next').hidden = true;
   // 押すと、いまの投稿で、もう一度番組を頼む（回数の上限はサーバーが見ている）
-  $('retry').hidden = false;
+  $('retry').hidden = !retry;
   renderLate();
 }
 
@@ -1077,12 +1082,12 @@ async function watchSample(onFail) {
 }
 
 // うまく作れなかったとき。テレビを見ていればテレビに、投稿に戻っていれば投稿の画面に知らせる
-function fail(message) {
+function fail(message, opts) {
   if ($('tv-view').hidden) {
     play('error');
     say(message);
   } else {
-    showError(message);
+    showError(message, opts);
   }
 }
 
@@ -1265,7 +1270,14 @@ async function submitRoomPost(post) {
     }
     // この端末にも残す（消すときと、部屋を出たあとのため）
     dropUndo();
-    state = { posts: [...state.posts, clean.post], ...keep() };
+    const next = [...state.posts, clean.post];
+    // 保存は MAX_POSTS 件までしか読み込めない。見えない投稿が残っているぶんあふれたときは、いまの部屋で見えない古い投稿から外す
+    while (next.length > MAX_POSTS) {
+      const hidden = next.findIndex((p) => !rc.isMine(p.id));
+      if (hidden < 0) break;
+      next.splice(hidden, 1);
+    }
+    state = { posts: next, ...keep() };
     const saved = save();
     roomCount += 1;
     finishSend(clean.post, res.queued
@@ -1314,14 +1326,14 @@ async function syncRoom() {
 // そろえた結果を、画面に映す
 function applySync(r) {
   if (!r) return;
-  // 送れなかった投稿（断られたもの）と、前の日の投稿は、この端末の一覧からも外す
-  const gone = new Set([...(r.goneIds ?? []), ...(r.dropped ?? []).map((d) => d.id)]);
+  // 前の日の投稿は、この端末の一覧からも外す。断られた投稿は、本人の言葉なので外さない（端末に残す）
+  const gone = new Set(r.goneIds ?? []);
   if (gone.size > 0) {
     state = { posts: state.posts.filter((p) => !gone.has(p.id)), ...keep() };
     save();
     renderPosts();
   }
-  if (r.dropped?.length > 0) roomSay(`${r.dropped.length}件の投稿は、部屋に送れませんでした。${r.dropped[0].error ?? ''}`);
+  if (r.dropped?.length > 0) roomSay(`${r.dropped.length}件の投稿は、部屋に送れませんでした。${r.dropped[0].error ?? ''}この端末には残っています。`);
   if (r.ok) {
     roomStatus = 'ok';
     roomCount = r.count;
@@ -1371,13 +1383,32 @@ function onRoomChanged() {
 const JOIN_ASK = 'この部屋に入りますか？\nこの部屋のことばは、ちゃのまのサーバーと Claude に送られます。投稿は翌朝に消えます。';
 const SWITCH_ASK = 'この部屋に入りますか？（いまの部屋の投稿と本棚は、この端末に残ります）';
 
+// 置き場所が止まっていると、部屋を作る・入るのに 1 分ほどかかる。ネットの不具合と取り違えないよう、待つ文に添える
+const WAKE_NOTE = '（置き場所が止まっていたときは、1 分ほどかかります）';
+
+// 部屋が見つからなくなった状態から作り直す・入り直すときだけ、きょうの自分の投稿を新しい部屋へ持ち越す。
+// ふつうの部屋の切り替えでは、別の家族の部屋へ投稿を持ち込まないよう、持ち越さない
+function carryIfLost() {
+  return rc.inRoom() && rc.isLost() ? state.posts.filter((p) => rc.isMine(p.id)) : [];
+}
+
+// 持ち越した投稿を新しい部屋に入れる（次の同期で自動で送られる）。送り直す件数を返す
+function requeueCarry(carry) {
+  return carry.length > 0 ? (rc.requeue(carry).count ?? 0) : 0;
+}
+const carryNote = (n) => (n > 0 ? `きょうの投稿 ${n} 件を、新しい部屋に送り直します。` : '');
+
 // コードの部屋に入る。ask が true のときは、確かめてから入る（確かめる前は、何も送らない）
 async function joinRoom(code, ask) {
   if (code === rc.code()) return { ok: true, same: true };
   if (ask && !confirm(rc.inRoom() ? SWITCH_ASK : JOIN_ASK)) return { ok: false, cancelled: true };
+  const carry = carryIfLost();
+  roomSay(`部屋に入っています…${WAKE_NOTE}`);
   const r = await rc.enter(code);
-  if (r.ok) onRoomChanged();
-  return r;
+  if (!r.ok) return r;
+  const carried = requeueCarry(carry);
+  onRoomChanged();
+  return { ...r, carried };
 }
 
 // 招待リンク（#r=コード）で開いたとき。確かめてから入り、入ったあとは URL から #r= を消す
@@ -1403,8 +1434,21 @@ async function handleInvite() {
     return;
   }
   const r = await joinRoom(code, true);
-  if (r.ok && !r.same) roomSay('部屋に入りました。');
-  else if (!r.ok && !r.cancelled) roomSay(r.error);
+  if (r.ok) {
+    if (!r.same) roomSay(`部屋に入りました。${carryNote(r.carried)}`);
+    return;
+  }
+  // 部屋が無い（404）ときは、やり直しても入れない。それ以外は、URL からコードを消したあとでも、あとで入れるよう、コード欄に残す
+  if (r.notFound) {
+    roomSay('この部屋は、もう無いようです。招待を送った人に、新しい招待を頼んでください。');
+    return;
+  }
+  $('room-code').value = code;
+  joinOpen = true;
+  renderRoom();
+  roomSay(r.cancelled
+    ? '入るのをやめました。入るときは、下の「入る」を押してください。'
+    : `${r.error} 下の「入る」を押すと、もう一度ためせます。`);
 }
 
 // ---- 部屋の夜7時 ----
@@ -1416,6 +1460,8 @@ function showRoomProgram(program, { made, fromWaiting }) {
 }
 
 async function goRoomEvening() {
+  // 番組を待っているあいだは、もう一度押されても、二重に始めない
+  if (waiting) return;
   // もう部屋にきょうの番組があれば、作らずにそれを流す
   const known = rc.todayProgram();
   if (known && known.date === rc.today()) {
@@ -1430,7 +1476,8 @@ async function goRoomEvening() {
     if (!roomOn()) return;
     applySync(synced);
     if (synced.lost) {
-      sayTop(synced.error);
+      // 部屋が無いと、「もう一度つくる」では直らない。テレビを見ているときは、テレビに出す
+      fail(synced.error, { retry: false });
       return;
     }
     if (synced.ok && synced.program) {
@@ -1447,7 +1494,8 @@ async function goRoomEvening() {
     if (!roomOn()) return;
     waiting = false;
     if (!res.ok) {
-      fail(res.error);
+      // 「あした、もう一度」のときは、いま押しても同じ断りが返るだけなので、「もう一度つくる」は出さない
+      fail(res.error, { retry: !res.error.includes('あした') });
       return;
     }
     if (!$('tv-view').hidden) {
@@ -1524,19 +1572,22 @@ $('room-join-open').addEventListener('click', () => {
 let joining = false;
 async function enterByCode() {
   if (joining) return;
-  const code = $('room-code').value.trim();
-  if (!code) {
+  const typed = $('room-code').value.trim();
+  if (!typed) {
     play('error');
     roomSay('部屋のコードを入れてください。');
     return;
   }
+  // 招待のリンクをそのまま貼られたときは、「#r=」からコードを取り出す。取り出せなければ、打たれた文字のまま確かめる
+  const at = typed.indexOf('#r=');
+  const code = (at >= 0 && parseInvite(typed.slice(at).split(/\s/)[0])) || typed;
   joining = true;
   try {
     // 別の部屋に入っているときだけ、確かめる（入っていないときは、入るために打ったので）
     const r = await joinRoom(code, rc.inRoom());
     if (r.ok) {
       $('room-code').value = '';
-      roomSay(r.same ? 'いま入っている部屋です。' : '部屋に入りました。');
+      roomSay(r.same ? 'いま入っている部屋です。' : `部屋に入りました。${carryNote(r.carried)}`);
     } else if (!r.cancelled) {
       play('error');
       roomSay(r.error);
@@ -1556,11 +1607,13 @@ $('room-create').addEventListener('click', async () => {
   joining = true;
   try {
     play('tap');
-    roomSay('部屋を作っています…');
+    const carry = carryIfLost();
+    roomSay(`部屋を作っています…${WAKE_NOTE}`);
     const r = await rc.create();
     if (r.ok) {
+      const carried = requeueCarry(carry);
       onRoomChanged();
-      roomSay('部屋を作りました。「家族に送る」で、招待を送ってください。');
+      roomSay(`部屋を作りました。「家族に送る」で、招待を送ってください。${carryNote(carried)}`);
     } else {
       play('error');
       roomSay(r.error);
