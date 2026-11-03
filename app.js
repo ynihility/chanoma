@@ -2,8 +2,9 @@
 // 画面に出す文字はすべて textContent で入れる。innerHTML は使わない。
 import {
   STORAGE_KEY, MAX_POSTS, TODAY_TOPICS, NEXT_TOPICS, WISH_DATE_TOPIC, HEADLINES, ANIMALS,
-  DEFAULT_ROLES, cleanPosts, cleanDate, cleanRoles, checkNews, reasonFact, loadState, serializeState,
+  DEFAULT_ROLES, cleanPosts, cleanPost, cleanDate, cleanRoles, checkNews, checkPostWords, reasonFact, loadState, serializeState,
 } from './safe.js';
+import { createRoomClient, parseInvite, hasInvite, SYNC_MS } from './room.js';
 import { play, setMuted } from './sound.js';
 import { voiceSupported, listen } from './voice.js';
 import { spriteCanvas } from './pixel.js';
@@ -88,6 +89,9 @@ try {
 } catch {
   // 保存が使えない環境でも、画面は動かす
 }
+
+// 部屋（家族でつながるサーバー）とのやりとり。入っていないときは何も送らず、これまでどおり1台の中だけで動く
+const rc = createRoomClient();
 
 // 1台で実演するために、ここで使う人（家族でのよびかた）を切り替える。よびかたは本人が好きな名前に変えられる
 const roles = () => state.roles ?? DEFAULT_ROLES;
@@ -402,10 +406,19 @@ function restorePost() {
   $('list-title').focus({ preventScroll: true });
 }
 
+// 投稿1件の本文（選んだ言葉は、語の途中で折れない箱に入れる。本人が書いたひとことは、そのまま流す）
+function postBody(p) {
+  const body = el('span', undefined, 'body');
+  const wish = p.wishDate ? monthDay(p.wishDate) : '';
+  nwJoin(body, [p.animal ? `【${p.animal}】` : '', p.who, p.topic, p.card, wish, p.headline].filter(Boolean));
+  if (p.text) body.append('　', p.text);
+  return body;
+}
+
 function renderPosts() {
   const list = $('posts');
   list.replaceChildren();
-  if (state.posts.length === 0 && !undo) {
+  if (state.posts.every((p) => roomOn() && !rc.isMine(p.id)) && !undo) {
     const empty = el('li');
     empty.append(nw('きょうの投稿は、'), nw('ここに'), nw('ならびます。'));
     list.append(empty);
@@ -413,17 +426,22 @@ function renderPosts() {
   state.posts.forEach((p, i) => {
     // 消した投稿の場所に、「もとにもどす」の行を出す
     if (undo && undo.index === i) list.append(undoItem());
+    // 部屋に入っているときは、この端末から送った投稿だけを出す（ほかの人の投稿は、数だけ）
+    if (roomOn() && !rc.isMine(p.id)) return;
     const li = el('li');
-    const body = el('span', undefined, 'body');
-    const wish = p.wishDate ? monthDay(p.wishDate) : '';
-    // 選んだ言葉は、語の途中で折れない箱に入れる。本人が書いたひとことは、そのまま流す
-    nwJoin(body, [p.animal ? `【${p.animal}】` : '', p.who, p.topic, p.card, wish, p.headline].filter(Boolean));
-    if (p.text) body.append('　', p.text);
+    const body = postBody(p);
+    // まだ部屋に送れていない投稿には、そう添える（つながったら、自動で送る）
+    if (roomOn() && rc.isPending(p.id)) body.append('　', nw('（まだ送れていません）'));
     const del = el('button', '消す');
     del.type = 'button';
     // 「消す」が何件も並ぶので、読み上げでどの投稿か分かるように名前を付ける
     del.setAttribute('aria-label', `${p.who}の「${p.card ?? (p.wishDate ? monthDay(p.wishDate) : p.topic)}」の投稿を消す`);
     del.addEventListener('click', () => {
+      // 部屋の投稿は、部屋からも消す（消したあとは元に戻せない）
+      if (roomOn()) {
+        removeRoomPost(p);
+        return;
+      }
       // 押したらすぐ消して保存する。確認の窓は出さず、数秒のあいだ「もとにもどす」を出す
       dropUndo();
       const index = state.posts.findIndex((x) => x.id === p.id);
@@ -443,6 +461,7 @@ function renderPosts() {
   if (undo && undo.index >= state.posts.length) list.append(undoItem());
   // 投稿が変わったので、できていた番組が使えるかどうかを、ボタンに反映する
   syncEvening();
+  renderRoomCount();
 }
 
 // 動きを減らす設定か（そのときは、飾りの動きを出さない）
@@ -502,6 +521,10 @@ function submitPost() {
     id: newId(), who: role, name: profile().nick, animal: profile().animal,
     topic: pick.topic, card: askDate ? '' : pick.card, wishDate, headline: pick.headline, text: $('text').value,
   };
+  if (roomOn()) {
+    submitRoomPost(post);
+    return;
+  }
   const r = cleanPosts({ posts: [...state.posts, post], nextDate: state.nextDate });
   if (!r.ok) {
     play('error');
@@ -511,6 +534,11 @@ function submitPost() {
   dropUndo();
   state = { posts: r.posts, ...keep() };
   const saved = save();
+  finishSend(post, saved ? 'おくりました。つぎの人に切り替えて、送れます。' : 'おくりました。ただし、この端末には保存できませんでした。画面を閉じると消えます。');
+}
+
+// 送れたあとの画面の更新（1台のときも、部屋のときも同じ）
+function finishSend(post, message) {
   play('send');
   hopAnimal(post.animal);
   // 手順の丸を、少しのあいだ全部「できた」にする
@@ -523,7 +551,7 @@ function submitPost() {
   pick.topic = pick.card = pick.headline = '';
   $('text').value = '';
   $('wish-date').value = '';
-  sayTop(saved ? 'おくりました。つぎの人に切り替えて、送れます。' : 'おくりました。ただし、この端末には保存できませんでした。画面を閉じると消えます。');
+  sayTop(message);
   renderForm();
   renderPosts();
   returnToTop(Boolean(post.animal));
@@ -574,13 +602,20 @@ function tvToTop() {
   $('tv-view').scrollIntoView({ block: 'start', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
 }
 
-function setView(onAir) {
+// onAir が true ならテレビ、false なら投稿の画面（shelf が true のときは、本棚の画面）
+function setView(onAir, shelf = false) {
   cancelFx();
-  $('post-view').hidden = onAir;
-  $('list-view').hidden = onAir;
-  $('date-view').hidden = onAir;
+  $('post-view').hidden = onAir || shelf;
+  $('list-view').hidden = onAir || shelf;
+  $('date-view').hidden = onAir || shelf;
+  $('shelf-view').hidden = onAir || !shelf;
   $('tv-view').hidden = !onAir;
   $('evening').hidden = onAir;
+  $('room-bar').hidden = onAir;
+  if (onAir) {
+    $('back').textContent = '投稿にもどる';
+    setTvMsg('');
+  }
   // 夜7時: 部屋を暗くして、テレビだけを光らせる
   document.body.classList.toggle('night', onAir);
   // 押したボタンは隠れるので、フォーカスを新しい画面に移す（キーボードや読み上げの人が迷子にならないように）。
@@ -589,6 +624,8 @@ function setView(onAir) {
     clearTop();
     $('screen').focus({ preventScroll: true });
     tvToTop();
+  } else if (shelf) {
+    $('shelf-title').focus();
   } else {
     $('post-title').focus();
   }
@@ -689,6 +726,19 @@ function sampleBand() {
   const band = el('p', undefined, 'sample-band');
   // 語のまとまりごとに箱へ入れる（狭い画面でも、まとまりの切れ目で折れる）
   nwJoin(band, ['見本の番組です', '（きょうの投稿', 'ではありません）'], '');
+  return band;
+}
+
+// 本棚から流している番組の、すべての場面のいちばん上に出す帯（再放送であることと、端末から戻した番組であること）。
+// 画面の中に置くので、テレビだけを切り取って録画しても残る
+function airBand(rerun) {
+  const band = el('p', undefined, 'air-band');
+  // 語のまとまりごとに箱へ入れる（狭い画面でも、日付の途中では折れない）
+  nwJoin(band, ['再放送です', `（${monthDay(rerun.date)}`, 'の番組）'], '');
+  if (rerun.restored) {
+    band.append('　');
+    nwJoin(band, ['端末から戻した', '番組です'], '');
+  }
   return band;
 }
 
@@ -795,6 +845,7 @@ function renderStep(still = false) {
   const wrap = el('div', undefined, still ? 'fade still' : 'fade');
   // 見本の番組は、どの場面にも帯を付ける
   if (show.sample) wrap.append(sampleBand());
+  if (show.rerun) wrap.append(airBand(show.rerun));
   if (step.kind === 'segment') {
     wrap.append(titleLine(CORNER_TITLES[step.corner] ?? []), hostLine(step.host));
     if (step.corner === 'つぎ') wrap.append(meetLine(step.nextDate));
@@ -903,6 +954,7 @@ function showError(message) {
   $('next').hidden = true;
   // 押すと、いまの投稿で、もう一度番組を頼む（回数の上限はサーバーが見ている）
   $('retry').hidden = false;
+  renderLate();
 }
 
 // 番組を待つあいだの画面（試験放送の色の帯と、テレ吉の札）。待ちが長いときは、一言を替える
@@ -946,17 +998,19 @@ function syncEvening() {
     button.textContent = 'テレ吉が準備中…';
     return;
   }
-  // 投稿が変わったら、できていた番組は使わない
-  if (ready && !isReady()) ready = null;
+  // 投稿が変わったら、できていた番組は使わない（部屋のときは、部屋にきょうの番組があるかどうか）
+  if (!roomOn() && ready && !isReady()) ready = null;
   button.disabled = false;
-  button.textContent = ready ? '番組をみる' : '夜7時にする';
-  if (!ready && $('msg').textContent === READY_MESSAGE) $('msg').textContent = '';
+  const has = roomOn() ? Boolean(rc.todayProgram()) : Boolean(ready);
+  button.textContent = has ? '番組をみる' : '夜7時にする';
+  if (!has && $('msg').textContent === READY_MESSAGE) $('msg').textContent = '';
 }
 
 // 届いた番組をテレビで見せる。待ち画面を見ていたなら、そのままモザイクで番組に切り替える
+// 部屋の番組（r.room）と、本棚の再放送（r.rerun）は、番組の投稿の写し（r.posts）を持つ。名前を折れない箱に入れるのに使う
 function watch(r, fromWaiting) {
   ready = null;
-  show = { steps: r.steps, index: 0 };
+  show = { steps: r.steps, index: 0, ...(r.posts ? { posts: r.posts } : {}), ...(r.room ? { room: true } : {}), ...(r.rerun ? { rerun: r.rerun } : {}) };
   $('next').hidden = false;
   $('retry').hidden = true;
   updateNext();
@@ -969,6 +1023,9 @@ function watch(r, fromWaiting) {
     play('tvon');
     renderStep();
   }
+  if (r.rerun) $('back').textContent = '本棚にもどる';
+  setTvMsg(r.note ?? '');
+  renderLate();
   syncEvening();
 }
 
@@ -1023,6 +1080,7 @@ function fail(message) {
 
 async function goEvening() {
   cancelVoice();
+  if (roomOn()) return goRoomEvening();
   if (state.posts.length === 0) {
     // 押したボタンの近く（上）に、読める大きさで出す
     sayTop('投稿が1件以上あると、番組を作れます。');
@@ -1087,6 +1145,459 @@ async function goEvening() {
   }
 }
 
+// ---- 部屋（家族でつながる） ----
+// 部屋に入っていないときは、ここの関数は何も送らない。入っているときだけ、投稿・番組・本棚を部屋とそろえる。
+// 部屋のコードは、画面にも記録にも出さない（コードを知っている人は、だれでも入れるため）
+
+const roomOn = () => rc.inRoom();
+// きょうの部屋の投稿の数（サーバーの数と、まだ送れていない数）。人の名前や、だれが読んだかは持たない
+let roomCount = 0;
+// 部屋とのつながり: 'ok'・'offline'（つながっていない）
+let roomStatus = 'ok';
+// 「部屋に入る」の入力欄を開いているか
+let joinOpen = false;
+// 投稿を部屋へ送っている最中か（二重に送らないため）
+let sending = false;
+
+// 部屋の帯の下に出す案内
+function roomSay(message) {
+  $('room-msg').textContent = message;
+  $('room-msg').hidden = !message;
+  if (message) $('room-link').hidden = true;
+}
+
+// 「2026年11月3日」の形にする
+function fullDate(dateText) {
+  const [y, m, d] = dateText.split('-').map(Number);
+  return `${y}年${m}月${d}日`;
+}
+
+// テレビの下の案内（きょうの番組はもうできています、など）
+function setTvMsg(text) {
+  $('tv-msg').textContent = text;
+  $('tv-msg').hidden = !text;
+}
+
+// 部屋の帯を、いまの状態に合わせる
+function renderRoom() {
+  const inRoom = roomOn();
+  const lost = inRoom && rc.isLost();
+  let status;
+  if (!inRoom) status = rc.unsupported() || 'いまは、この端末の中だけで使っています。家族とつなぐときは、「部屋に入る」を押してください。';
+  else if (lost) status = '部屋が、サーバーに見つかりません。新しい部屋を作って、招待を送り直してください。投稿と本棚は、この端末に残っています。';
+  else if (roomStatus === 'offline') status = '部屋に入っています。いまはつながっていません。つながると、自動でそろえます。';
+  else status = '部屋に入っています。家族の投稿と番組は、部屋でそろいます。';
+  $('room-status').textContent = status;
+  $('room-share').hidden = !inRoom || lost;
+  $('room-leave').hidden = !inRoom;
+  $('room-join-box').hidden = !joinOpen;
+  $('room-join-open').setAttribute('aria-expanded', String(joinOpen));
+  // 部屋のことばの行き先は、入る前の画面と、入っているあいだ、いつも出す
+  $('room-notice').hidden = !inRoom && !joinOpen;
+  // 部屋の投稿は、1件ずつ消す（まとめて消すと、部屋とこの端末の数が食い違うため）
+  $('clear').hidden = inRoom;
+}
+
+// 「きょうの投稿 n 件」。数だけ出す（だれの投稿か、だれが読んだかは出さない）
+function renderRoomCount() {
+  const box = $('room-count');
+  box.hidden = !roomOn();
+  if (!roomOn()) return;
+  box.replaceChildren('きょうの投稿 ', el('span', String(roomCount), 'num'), ' 件');
+  const unsent = rc.pendingCount();
+  if (unsent > 0) box.append('　', nw(`（${unsent}件は、まだ送れていません）`));
+}
+
+// 番組のあとに届いた一言。番組には混ぜず、テレビの下に並べる
+function renderLate() {
+  const posts = show.room && !$('tv-view').hidden ? rc.latePosts() : [];
+  $('late').hidden = posts.length === 0;
+  $('late-posts').replaceChildren(...posts.map((p) => {
+    const li = el('li');
+    if (p.animal) li.append(spriteCanvas(p.animal, 3, undefined, { shadow: true }));
+    li.append(postBody(p));
+    return li;
+  }));
+}
+
+// 禁止の言葉で断られたとき。本文は消さず、理由を伝える
+const bannedMessage = (reason) => `この言葉は使えません。${typeof reason === 'string' && reason.length <= 60 ? `理由：${reason}。` : ''}ひとことは消していません。書き直してから、もう一度おくってください。`;
+
+// 投稿を部屋に送る。圏外などで送れなかったときは、端末に持って、つながったら送る
+async function submitRoomPost(post) {
+  if (sending) return;
+  const clean = cleanPost(post);
+  if (!clean.ok) {
+    play('error');
+    say(clean.error);
+    return;
+  }
+  // サーバーでも同じ検査をするが、送る前に止めたほうが早く伝えられる
+  const words = checkPostWords(clean.post);
+  if (!words.ok) {
+    play('error');
+    say(bannedMessage(words.reason));
+    return;
+  }
+  if (roomCount >= MAX_POSTS) {
+    play('error');
+    say(`きょうは${MAX_POSTS}件までです。`);
+    return;
+  }
+  sending = true;
+  $('send').disabled = true;
+  try {
+    const res = await rc.post(clean.post);
+    if (!roomOn()) return;
+    if (!res.ok) {
+      play('error');
+      say(res.reason ? bannedMessage(res.reason) : res.error);
+      if (res.lost) applySync({ ok: false, lost: true });
+      return;
+    }
+    // この端末にも残す（消すときと、部屋を出たあとのため）
+    dropUndo();
+    state = { posts: [...state.posts, clean.post], ...keep() };
+    const saved = save();
+    roomCount += 1;
+    finishSend(clean.post, res.queued
+      ? 'おくりました。いまはつながっていないので、つながったら部屋に送ります。'
+      : `おくりました。部屋に届きました。${saved ? 'つぎの人に切り替えて、送れます。' : 'ただし、この端末には保存できませんでした。画面を閉じると消えます。'}`);
+    syncRoom();
+  } finally {
+    sending = false;
+    $('send').disabled = false;
+  }
+}
+
+// 自分の投稿を、部屋からも消す
+async function removeRoomPost(p) {
+  play('tap');
+  const r = await rc.remove(p.id);
+  if (!r.ok) {
+    play('error');
+    say(r.error);
+    return;
+  }
+  dropUndo();
+  state = { posts: state.posts.filter((x) => x.id !== p.id), ...keep() };
+  save();
+  roomCount = Math.max(0, roomCount - 1);
+  renderPosts();
+  say('部屋の投稿を消しました。');
+  syncRoom();
+}
+
+// 部屋とそろえる（新しい投稿を取り、まだ送れていない投稿を送り、番組のようすを知る）
+async function syncRoom() {
+  if (!roomOn() || rc.isLost()) return;
+  const r = await rc.sync();
+  if (!roomOn()) return;
+  applySync(r);
+  if (!r.ok) return;
+  // 部屋に入ったあとの最初の1回だけ、本棚を持ち寄る（2回目からは、何もしない）
+  const e = await rc.exchange();
+  if (e.ok && e.received > 0 && roomOn()) {
+    roomSay(`ほかの端末から、${e.received}本の番組が本棚に戻りました。`);
+    if (!$('shelf-view').hidden) renderShelf();
+  }
+}
+
+// そろえた結果を、画面に映す
+function applySync(r) {
+  if (!r) return;
+  // 送れなかった投稿（断られたもの）と、前の日の投稿は、この端末の一覧からも外す
+  const gone = new Set([...(r.goneIds ?? []), ...(r.dropped ?? []).map((d) => d.id)]);
+  if (gone.size > 0) {
+    state = { posts: state.posts.filter((p) => !gone.has(p.id)), ...keep() };
+    save();
+    renderPosts();
+  }
+  if (r.dropped?.length > 0) roomSay(`${r.dropped.length}件の投稿は、部屋に送れませんでした。${r.dropped[0].error ?? ''}`);
+  if (r.ok) {
+    roomStatus = 'ok';
+    roomCount = r.count;
+  } else if (r.lost) {
+    // 新しい部屋を作れるように、入力欄を開く
+    joinOpen = true;
+  } else if (r.offline) {
+    roomStatus = 'offline';
+  }
+  if (r.badProgram) roomSay('届いた番組が決まりに合わなかったので、使いませんでした。');
+  renderRoom();
+  renderRoomCount();
+  renderLate();
+  syncEvening();
+}
+
+// 画面が見えているあいだ、20秒ごとに部屋とそろえる
+let syncTimer = 0;
+function stopSync() {
+  clearInterval(syncTimer);
+  syncTimer = 0;
+}
+function startSync() {
+  stopSync();
+  if (!roomOn()) return;
+  syncRoom();
+  syncTimer = setInterval(() => {
+    if (document.visibilityState === 'visible') syncRoom();
+  }, SYNC_MS);
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') syncRoom();
+});
+
+// 部屋に入った・作った・出たあとに、画面を合わせて、そろえ直す
+function onRoomChanged() {
+  ready = null;
+  roomCount = 0;
+  roomStatus = 'ok';
+  joinOpen = false;
+  roomSay('');
+  renderRoom();
+  renderPosts();
+  startSync();
+}
+
+const JOIN_ASK = 'この部屋に入りますか？\nこの部屋のことばは、ちゃのまのサーバーと Claude に送られます。投稿は翌朝に消えます。';
+const SWITCH_ASK = 'この部屋に入りますか？（いまの部屋の投稿と本棚は、この端末に残ります）';
+
+// コードの部屋に入る。ask が true のときは、確かめてから入る（確かめる前は、何も送らない）
+async function joinRoom(code, ask) {
+  if (code === rc.code()) return { ok: true, same: true };
+  if (ask && !confirm(rc.inRoom() ? SWITCH_ASK : JOIN_ASK)) return { ok: false, cancelled: true };
+  const r = await rc.enter(code);
+  if (r.ok) onRoomChanged();
+  return r;
+}
+
+// 招待リンク（#r=コード）で開いたとき。確かめてから入り、入ったあとは URL から #r= を消す
+function clearInviteHash() {
+  try {
+    history.replaceState(null, '', location.pathname + location.search);
+  } catch {
+    // 消せなくても、画面は動かす
+  }
+}
+async function handleInvite() {
+  if (!hasInvite(location.hash)) return;
+  const code = parseInvite(location.hash);
+  // 確かめる前に、コードを URL に残さない（履歴に残るため）。コードはこの関数の中だけで持つ
+  clearInviteHash();
+  if (!code) {
+    roomSay('招待のリンクの形が正しくありません。もう一度、送ってもらってください。');
+    return;
+  }
+  const reason = rc.unsupported();
+  if (reason) {
+    roomSay(reason);
+    return;
+  }
+  const r = await joinRoom(code, true);
+  if (r.ok && !r.same) roomSay('部屋に入りました。');
+  else if (!r.ok && !r.cancelled) roomSay(r.error);
+}
+
+// ---- 部屋の夜7時 ----
+
+// 部屋の番組をテレビで流す。made が false のときは、すでにあった番組なので、そう伝える
+function showRoomProgram(program, { made, fromWaiting }) {
+  const steps = buildSteps(program.news, program.posts, program.nextDate);
+  watch({ steps, posts: program.posts, room: true, note: made ? '' : 'きょうの番組はもうできています。' }, fromWaiting);
+}
+
+async function goRoomEvening() {
+  // もう部屋にきょうの番組があれば、作らずにそれを流す
+  const known = rc.todayProgram();
+  if (known && known.date === rc.today()) {
+    showRoomProgram(known, { made: false, fromWaiting: false });
+    return;
+  }
+  waiting = true;
+  syncEvening();
+  try {
+    // 先に部屋をそろえる。まだ送れていない投稿を送り、ほかの人がもう番組を作っていないかを知る
+    const synced = await rc.sync();
+    if (!roomOn()) return;
+    applySync(synced);
+    if (synced.lost) {
+      sayTop(synced.error);
+      return;
+    }
+    if (synced.ok && synced.program) {
+      waiting = false;
+      showRoomProgram(synced.program, { made: false, fromWaiting: false });
+      return;
+    }
+    if (synced.ok && synced.count === 0) {
+      sayTop('投稿が1件以上あると、番組を作れます。');
+      return;
+    }
+    showWaiting();
+    const res = await rc.makeNews(state.nextDate);
+    if (!roomOn()) return;
+    waiting = false;
+    if (!res.ok) {
+      fail(res.error);
+      return;
+    }
+    if (!$('tv-view').hidden) {
+      showRoomProgram(res.program, { made: res.made, fromWaiting: true });
+    } else {
+      // 待っているあいだに「投稿にもどる」を押していたら、勝手にテレビへは戻さない。できたことだけ知らせる
+      play('next');
+      $('msg').textContent = READY_MESSAGE;
+    }
+    syncRoom();
+  } finally {
+    waiting = false;
+    clearTimeout(waitTimer);
+    syncEvening();
+  }
+}
+
+// ---- 番組の本棚 ----
+
+// 本棚の1本を、テレビで流す（再放送）。AI の注記は、再放送でも出る
+function playShelfItem(item) {
+  const steps = buildSteps(item.news, item.posts, item.nextDate);
+  watch({ steps, posts: item.posts, rerun: { date: item.date, restored: Boolean(item.restored) } }, false);
+}
+
+function renderShelf() {
+  const items = rc.shelf();
+  $('shelf-empty').hidden = items.length > 0;
+  $('shelf-list').replaceChildren(...items.map((item) => {
+    const li = el('li');
+    const b = el('button');
+    b.type = 'button';
+    nwJoin(b, [fullDate(item.date), ...(item.restored ? ['（端末から戻した）'] : [])], '　');
+    b.addEventListener('click', () => {
+      play('tap');
+      playShelfItem(item);
+    });
+    li.append(b);
+    return li;
+  }));
+}
+
+function openShelf() {
+  cancelVoice();
+  renderShelf();
+  setView(false, true);
+}
+
+$('shelf-open').addEventListener('click', () => {
+  play('tap');
+  openShelf();
+});
+$('shelf-back').addEventListener('click', () => {
+  play('tap');
+  setView(false);
+  say('');
+});
+
+// ---- 部屋の帯のボタン ----
+
+$('room-join-open').addEventListener('click', () => {
+  play('tap');
+  const reason = rc.unsupported();
+  if (reason) {
+    roomSay(reason);
+    return;
+  }
+  joinOpen = !joinOpen;
+  roomSay('');
+  renderRoom();
+  if (joinOpen) $('room-code').focus();
+});
+
+let joining = false;
+async function enterByCode() {
+  if (joining) return;
+  const code = $('room-code').value.trim();
+  if (!code) {
+    play('error');
+    roomSay('部屋のコードを入れてください。');
+    return;
+  }
+  joining = true;
+  try {
+    // 別の部屋に入っているときだけ、確かめる（入っていないときは、入るために打ったので）
+    const r = await joinRoom(code, rc.inRoom());
+    if (r.ok) {
+      $('room-code').value = '';
+      roomSay(r.same ? 'いま入っている部屋です。' : '部屋に入りました。');
+    } else if (!r.cancelled) {
+      play('error');
+      roomSay(r.error);
+    }
+  } finally {
+    joining = false;
+  }
+}
+$('room-enter').addEventListener('click', enterByCode);
+$('room-code').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) enterByCode();
+});
+
+$('room-create').addEventListener('click', async () => {
+  if (joining) return;
+  if (rc.inRoom() && !confirm('新しい部屋を作って、そちらに移ります。いまの部屋の投稿と本棚は、この端末に残ります。よろしいですか？')) return;
+  joining = true;
+  try {
+    play('tap');
+    roomSay('部屋を作っています…');
+    const r = await rc.create();
+    if (r.ok) {
+      onRoomChanged();
+      roomSay('部屋を作りました。「家族に送る」で、招待を送ってください。');
+    } else {
+      play('error');
+      roomSay(r.error);
+    }
+  } finally {
+    joining = false;
+  }
+});
+
+$('room-leave').addEventListener('click', () => {
+  if (!confirm('部屋を出ますか？\n部屋のコードを忘れます。もう一度入るには、招待のリンクかコードが要ります。投稿と本棚は、この端末に残ります。')) return;
+  play('tap');
+  rc.leave();
+  onRoomChanged();
+  roomSay('部屋を出ました。');
+});
+
+// 招待を送る。スマホの共有の画面が使えればそれで、使えなければコピーする
+$('room-share').addEventListener('click', async () => {
+  const url = rc.link();
+  if (!url) return;
+  play('tap');
+  const text = 'ちゃのまの、家族の部屋にさそいます。このリンクを開くと、部屋に入れます。';
+  roomSay('');
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: 'ちゃのま', text, url });
+      return;
+    } catch (e) {
+      // 共有の画面を閉じただけなら、何もしない。ほかの失敗は、コピーに切り替える
+      if (e?.name === 'AbortError') return;
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(`${text}\n${url}`);
+    roomSay('招待をコピーしました。LINE などに貼って、家族に送ってください。');
+  } catch {
+    // コピーできないときは、リンクを出して、手でコピーしてもらう
+    roomSay('コピーできませんでした。下のリンクを、手でコピーして送ってください。');
+    $('room-link').value = url;
+    $('room-link').hidden = false;
+    $('room-link').select();
+  }
+});
+
 // ---- つなぐ ----
 
 $('send').addEventListener('click', submitPost);
@@ -1149,7 +1660,9 @@ $('sound').addEventListener('click', () => {
   if (!off) play('tap');
 });
 $('back').addEventListener('click', () => {
-  setView(false);
+  // 本棚から流していたときは、本棚に戻る
+  if (show.rerun) openShelf();
+  else setView(false);
   say('');
   sampleMsg('');
 });
@@ -1226,4 +1739,11 @@ for (const slot of document.querySelectorAll('[data-sprite]')) {
 renderRoles();
 renderForm();
 renderPosts();
+renderRoom();
 if (loadNote) say(loadNote);
+// 招待リンクで開いたときは、確かめてから部屋に入る。そのあと、入っている部屋とそろえ始める
+function openedByLink() {
+  handleInvite().finally(startSync);
+}
+window.addEventListener('hashchange', openedByLink);
+openedByLink();

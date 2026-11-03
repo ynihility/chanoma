@@ -677,7 +677,7 @@
     /* 失敗の画面の「見本の番組をみる」（画面の中に置く） */
     .screen .sample-go { margin: 0 0 var(--gap-5); }
     /* 見本の番組のすべての場面の、いちばん上の帯。紙の地に朱の帯で、お知らせだと分かるようにする（家族の短冊とは形が違う） */
-    .screen .sample-band {
+    .screen .sample-band, .screen .air-band {
       margin: 0 0 var(--gap-4);
       padding: var(--gap-2) var(--gap-4);
       font-size: 24px;
@@ -1030,6 +1030,35 @@
       cursor: pointer;
     }
 
+    /* ===== 部屋（家族でつながる）と、番組の本棚 ===== */
+    /* 部屋の帯: 鴨居の下に、紙の短冊で置く。入り口のボタンと、いまの状態を並べる */
+    .room-bar {
+      max-width: 880px;
+      margin: var(--gap-4) auto 0;
+      padding: var(--gap-3) var(--gap-4) var(--gap-2);
+      background: var(--paper);
+      border: 3px solid var(--ink);
+      border-left: 14px solid var(--asagi);
+      border-radius: 4px;
+      box-shadow: var(--drop);
+    }
+    .room-bar .room-status { margin: 0 0 var(--gap-2); font-weight: 700; line-height: 1.5; word-break: auto-phrase; overflow-wrap: anywhere; }
+    .room-bar .room-join-box { margin-top: var(--gap-2); }
+    .room-bar .room-join-box .field { width: 100%; max-width: 440px; }
+    .room-bar .row { margin-bottom: var(--gap-2); }
+    /* コードは、大文字と小文字を区別するので、見分けやすい等幅で入れる */
+    #room-code { font-family: var(--font-dot); letter-spacing: 0.05em; }
+    .room-count { margin: var(--gap-2) 0 0; font-weight: 700; }
+    @media (max-width: 640px) {
+      .room-bar { margin: var(--gap-3) var(--gap-3) 0; padding: var(--gap-3) var(--gap-3) var(--gap-2); }
+    }
+    /* 本棚の一覧: 日付ごとに、押せる座布団を1つずつ縦に並べる */
+    .shelf-list { list-style: none; margin: var(--gap-3) 0; padding: 0; display: grid; gap: var(--gap-3); }
+    .shelf-list button { width: 100%; text-align: left; }
+    /* 番組のあとに届いた一言（番組には混ぜず、テレビの下に並べる） */
+    #late { margin-top: var(--gap-5); }
+    #late h2 { padding-bottom: var(--gap-1); border-bottom: 5px double var(--ink); }
+
     /* 動きを減らす設定の人には、動きを止める */
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -1051,6 +1080,30 @@
 
   <!-- 上の案内（おくったあと・夜7時にできないとき）。読み上げの入れ物は、はじめから置いておく -->
   <div class="top-live" role="status"><p id="top-msg" class="top-msg" hidden></p></div>
+
+  <!-- 部屋の帯。入っていないときは1台の中だけで動く。入っているときは、家族の投稿と番組を部屋でそろえる -->
+  <section id="room-bar" class="room-bar" aria-labelledby="room-title">
+    <h2 id="room-title" class="sr">部屋</h2>
+    <p id="room-status" class="room-status"></p>
+    <div class="row">
+      <button id="room-share" type="button" hidden>家族に送る</button>
+      <button id="room-join-open" type="button" aria-controls="room-join-box" aria-expanded="false">部屋に入る</button>
+      <button id="room-leave" type="button" hidden>部屋を出る</button>
+      <button id="shelf-open" type="button">本棚</button>
+    </div>
+    <div id="room-join-box" class="room-join-box" hidden>
+      <p class="label"><label for="room-code">部屋のコード</label></p>
+      <div class="row">
+        <div class="field"><input id="room-code" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+        <button id="room-enter" type="button">入る</button>
+      </div>
+      <div class="row"><button id="room-create" type="button">新しく部屋を作る</button></div>
+    </div>
+    <p id="room-notice" class="note" hidden>この部屋のことばは、ちゃのまのサーバーと Claude に送られます。投稿は翌朝に消えます。</p>
+    <div role="status"><p id="room-msg" class="msg" hidden></p></div>
+    <!-- 共有もコピーもできないときだけ、招待のリンクをここに出す（手でコピーしてもらう） -->
+    <input id="room-link" type="text" readonly hidden aria-label="招待のリンク">
+  </section>
 
   <!-- 障子の帯。app.js が data-sprite の場所にドット絵を入れる（飾りなので読み上げない） -->
   <div class="shoji" aria-hidden="true">
@@ -1126,12 +1179,21 @@
       <input id="next-date" type="date" aria-labelledby="date-title">
     </section>
 
+    <section id="shelf-view" class="panel" aria-labelledby="shelf-title" hidden>
+      <h2 id="shelf-title" tabindex="-1">番組の本棚</h2>
+      <p class="note">この端末に残っている番組です。えらぶと、テレビでもう一度流します。</p>
+      <ul id="shelf-list" class="shelf-list"></ul>
+      <p id="shelf-empty" class="note" hidden>まだ番組がありません。夜7時にすると、ここにたまります。</p>
+      <div class="row"><button id="shelf-back" type="button">投稿にもどる</button></div>
+    </section>
+
     <section id="list-view" class="panel" aria-labelledby="list-title">
       <div class="row">
         <h2 id="list-title" tabindex="-1">きょうの投稿</h2>
         <span class="spacer"></span>
         <button id="clear">ぜんぶ消す</button>
       </div>
+      <p id="room-count" class="room-count" hidden></p>
       <ul id="posts" class="posts"></ul>
       <!-- 見本の番組への入口。きょうの投稿は使わない。本物の番組を待っているあいだは、app.js が押せなくする -->
       <div class="sample-entry">
@@ -1163,6 +1225,12 @@
       <p class="note slip" id="slip"><span class="nw">テレ吉の言葉</span>は、<span class="nw">AI（Claude）</span>が考えています。<span class="nw">家族の言葉</span>は、そのまま出しています。</p>
       <!-- 見本の番組のときだけ、上の注記のかわりに出す（app.js が hidden を切り替える） -->
       <p class="note slip" id="slip-sample" hidden>これは<span class="nw">見本の番組</span>です。アプリに入っている、<span class="nw">つくりものの家族</span>の投稿と文を流しています（AI には送っていません）。<span class="nw">テレ吉の言葉は、</span><span class="nw">開発のときに</span><span class="nw">AI（Claude）が</span><span class="nw">考えたものです。</span></p>
+      <!-- 部屋の番組のときの案内（きょうの番組はもうできています／再放送／端末から戻した、など） -->
+      <div role="status"><p class="note slip" id="tv-msg" hidden></p></div>
+      <section id="late" class="panel" aria-labelledby="late-title" hidden>
+        <h2 id="late-title"><span class="nw">番組のあとに</span><span class="nw">届いた一言</span></h2>
+        <ul id="late-posts" class="posts"></ul>
+      </section>
     </section>
   </main>
 
