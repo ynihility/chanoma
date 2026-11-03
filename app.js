@@ -2,7 +2,7 @@
 // 画面に出す文字はすべて textContent で入れる。innerHTML は使わない。
 import {
   STORAGE_KEY, MAX_POSTS, TODAY_TOPICS, NEXT_TOPICS, WISH_DATE_TOPIC, HEADLINES, ANIMALS,
-  DEFAULT_ROLES, cleanPosts, cleanDate, cleanRoles, checkNews, loadState, serializeState,
+  DEFAULT_ROLES, cleanPosts, cleanDate, cleanRoles, checkNews, reasonFact, loadState, serializeState,
 } from './safe.js';
 import { play, setMuted } from './sound.js';
 import { voiceSupported, listen } from './voice.js';
@@ -561,11 +561,39 @@ function meetLine(dateText) {
   return p;
 }
 
-// 番組を、画面に映す順番の一覧にする。本文は投稿のほうから取り、Claude の返事からは取らない
+// 番組表の補足の見出し。値は投稿の言葉そのもの（会いたい日だけ「11月23日」の形に直して出す）
+const FACT_LABELS = { topic: 'お題', card: '札', headline: '見出し', wishDate: '会いたい日' };
+// 出る人がこの件数以上の番組では、番組表に絵を付けず、名前を「、」でつないで流す（縦に長くなりすぎないように）
+const COMPACT_FROM = 11;
+
+// 番組表の場面のデータ。出る人の並びは、投稿からコードだけで作る（Claude の返事から名前を取らない）。
+// 特集名（feature）とわけ（lineup）は、checkNews が「一覧にある言葉で、投稿の事実と合う」と確かめたものだけが入っている。
+// どちらも無い番組では、名前の並びだけの番組表になる
+function tableStep(news, byId) {
+  const reasons = new Map((news.lineup ?? []).map((l) => [l.corner, l.reason]));
+  // 番組に出てくるコーナーを、出てくる順に
+  const corners = [...new Set(news.segments.map((s) => s.corner))].map((corner) => {
+    const cornerPosts = news.segments.filter((s) => s.corner === corner).map((s) => byId.get(s.from));
+    const reason = reasons.get(corner);
+    // わけの補足（「お題：そら」など）は、検査と同じ reasonFact で出す。合わなければ、わけも出さない
+    const fact = reason ? reasonFact(reason, corner, cornerPosts) : null;
+    return {
+      corner,
+      reason: fact ? reason : undefined,
+      fact: fact?.kind ? fact : undefined,
+      members: cornerPosts.map((p) => ({ who: p.who, name: p.name, animal: p.animal })),
+    };
+  });
+  return { kind: 'table', feature: news.feature, corners };
+}
+
+// 番組を、画面に映す順番の一覧にする。本文は投稿のほうから取り、Claude の返事からは取らない。
+// はじめの次に、今夜の番組表を1場面入れる
 function buildSteps(news, posts, nextDate) {
   const byId = new Map(posts.map((p) => [p.id, p]));
   return [
     { kind: 'opening', host: news.opening },
+    tableStep(news, byId),
     ...news.segments.map((s) => ({ kind: 'segment', corner: s.corner, host: s.host, post: byId.get(s.from), nextDate })),
     { kind: 'closing', host: news.closing },
   ];
@@ -588,6 +616,76 @@ function sampleBand() {
 function syncSlip() {
   $('slip').hidden = Boolean(show.sample);
   $('slip-sample').hidden = !show.sample;
+}
+
+// 今夜の番組表の中身（特集名と、コーナーごとのわけ・出る人）。文字はすべて textContent で入れる。
+// 特集名とわけは AI が選んだものなので、札を付ける。コーナー名・出る人・補足は、コードが投稿から作ったものなので、札は付けない
+function lineupNodes(step) {
+  const nodes = [];
+  if (step.feature) {
+    // 札と特集名を1つの枠にまとめて、AI が選んだのは特集名だと分かるようにする
+    const box = el('div', undefined, 'feature');
+    const label = el('p', undefined, 'feature-label');
+    label.append(aiChip(), nw('今夜の特集'));
+    const name = el('p', undefined, 'feature-name');
+    name.append(nw(step.feature));
+    box.append(label, name);
+    nodes.push(box);
+  }
+  // 出る人が多い番組では、絵を付けず、名前をつなげて出す
+  const compact = step.corners.reduce((n, c) => n + c.members.length, 0) >= COMPACT_FROM;
+  // 出る人の名前。ニックネームがあれば「（　）」で添える（箱は、よびかたとニックネームで別々にする）
+  const nameParts = (m) => [m.who, m.name ? `（${m.name}）` : ''].filter(Boolean);
+  const list = el('ul', undefined, 'lineup');
+  list.setAttribute('role', 'list');
+  for (const c of step.corners) {
+    const item = el('li', undefined, 'lineup-item');
+    const title = el('p', undefined, 'lineup-title');
+    title.append(...(CORNER_TITLES[c.corner] ?? []).map(nw));
+    item.append(title);
+    if (c.reason) {
+      const why = el('p', undefined, 'lineup-why');
+      // わけの文は1つの箱に入れる。札と同じ行に入りきらないときは、文ごと次の行へ移る（文節の途中で折れない）
+      why.append(aiChip(), nw(c.reason));
+      item.append(why);
+    }
+    if (c.fact) {
+      const value = c.fact.kind === 'wishDate' ? monthDay(c.fact.value) : c.fact.value;
+      const fact = el('p', undefined, 'lineup-fact');
+      fact.append(nw(`${FACT_LABELS[c.fact.kind]}：${value}`));
+      item.append(fact);
+    }
+    // 出る人は、出る順のまま。番号や件数は付けない（順位に見えないように）
+    if (compact) {
+      // 「、」は直前の名前の箱に入れる（「、」が行の頭に来ないように）
+      const names = el('p', undefined, 'lineup-names');
+      const last = c.members.length - 1;
+      nwJoin(names, c.members.map((m, i) => nameParts(m).join('') + (i < last ? '、' : '')), '');
+      item.append(names);
+    } else {
+      const members = el('ul', undefined, 'lineup-members');
+      members.setAttribute('role', 'list');
+      for (const m of c.members) {
+        const li = el('li', undefined, 'lineup-who');
+        // 動物の絵は飾りなので読み上げない。動物を選んでいない人は、同じ幅のあきを置いて、名前の左をそろえる
+        if (m.animal) {
+          li.append(spriteCanvas(m.animal, 2, undefined, { shadow: true }));
+        } else {
+          const blank = el('span', undefined, 'blank');
+          blank.setAttribute('aria-hidden', 'true');
+          li.append(blank);
+        }
+        const text = el('span', undefined, 'lineup-who-text');
+        nwJoin(text, nameParts(m), '');
+        li.append(text);
+        members.append(li);
+      }
+      item.append(members);
+    }
+    list.append(item);
+  }
+  nodes.push(list);
+  return nodes;
 }
 
 // 司会のつなぎの言葉。テレ吉（飾り）の横に吹き出しを出し、中に「AI」の札を入れる（家族の短冊と見分けるため）
@@ -638,6 +736,9 @@ function renderStep(still = false) {
     box.append(card);
     if (p.text) box.append(el('p', p.text, 'text'));
     wrap.append(box);
+  } else if (step.kind === 'table') {
+    // 番組表はテレ吉のせりふではないので、司会の吹き出しは付けない
+    wrap.append(titleLine(['今夜の', '番組表']), ...lineupNodes(step));
   } else {
     wrap.append(titleLine(step.kind === 'opening' ? ['夜7時の', 'かぞくニュース'] : ['おしまい']), hostLine(step.host));
   }

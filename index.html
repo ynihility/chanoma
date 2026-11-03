@@ -703,6 +703,47 @@
     }
     /* 見本の番組の札「AI（見本）」: 紙の色にして、本物の AI の札（山吹）と見分ける */
     .ai-chip.sample-chip { background: var(--paper); border: 2px solid var(--ink); }
+    /* 今夜の番組表（はじめの次の場面）。特集名とわけは AI が選んだものなので、札を付ける。
+       出る人の並びは、投稿からコードで作ったもので、札は付けない。色は今の画面の色（山吹・淡い緑）だけ。文字は 24px 以上 */
+    .screen .feature {
+      margin: 0 0 var(--gap-5);
+      padding: var(--gap-2) var(--gap-4) var(--gap-3);
+      border: 4px solid var(--crt-light);
+      border-radius: 20px;
+    }
+    .screen .feature-label { margin: 0; font-size: 24px; line-height: 1.6; }
+    .screen .feature-name {
+      margin: 0;
+      font-family: var(--font-head);
+      font-size: 28px;
+      font-weight: 800;
+      line-height: 1.5;
+      letter-spacing: 0.12em;
+      color: var(--yamabuki);
+      overflow-wrap: anywhere;
+    }
+    .screen .lineup { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap-5); }
+    /* コーナーごとのまとまり。左の山吹の線で、1つのコーナーの中身だと分かるようにする */
+    .screen .lineup-item { padding-left: var(--gap-3); border-left: 6px solid var(--yamabuki); }
+    .screen .lineup-title {
+      margin: 0 0 var(--gap-1);
+      font-family: var(--font-head);
+      font-size: 26px;
+      font-weight: 800;
+      line-height: 1.5;
+      letter-spacing: 0.08em;
+      color: var(--yamabuki);
+    }
+    /* わけの文は、1つの箱（.nw）に入っている。札と同じ行に入りきらないときは、文ごと次の行へ移るので、札の後ろで語の途中から折れない */
+    .screen .lineup-why { margin: 0; font-size: 24px; line-height: 1.6; word-break: auto-phrase; }
+    .screen .lineup-fact { margin: 0; font-size: 24px; font-weight: 700; line-height: 1.6; overflow-wrap: anywhere; word-break: auto-phrase; }
+    .screen .lineup-members { list-style: none; margin: var(--gap-2) 0 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap-1); }
+    .screen .lineup-who { display: flex; align-items: center; gap: var(--gap-2); font-size: 24px; line-height: 1.5; }
+    .screen .lineup-who .sprite { flex: none; }
+    /* 動物を選んでいない人は、絵のかわりに同じ幅のあきを置いて、名前の左をそろえる（絵 34px = 16 ドット × 2 倍 + 影） */
+    .screen .lineup-who .blank { flex: none; width: 34px; height: 34px; }
+    .screen .lineup-who-text { min-width: 0; overflow-wrap: anywhere; }
+    .screen .lineup-names { margin: var(--gap-2) 0 0; font-size: 24px; line-height: 1.6; overflow-wrap: anywhere; word-break: auto-phrase; }
     .screen .meet { font-size: 28px; font-weight: 700; color: var(--yamabuki); margin: 0 0 var(--gap-4); }
     /* 家族の言葉の短冊: 紙の地に濃い茶の文字。上に朱の帯と、ひもを通す穴 */
     .screen .post {
@@ -1102,7 +1143,7 @@
         </div>
       </div>
       <div class="tv-legs" aria-hidden="true"><span></span><span></span></div>
-      <p class="note slip" id="slip"><span class="nw">つなぎの言葉</span>は「AI」が付けました。<span class="nw">みなさんの言葉</span>は、そのまま出しています。</p>
+      <p class="note slip" id="slip"><span class="nw">つなぎの言葉</span>と、番組表の特集・ならべたわけは「AI」が付けました。<span class="nw">みなさんの言葉</span>は、そのまま出しています。</p>
       <!-- 見本の番組のときだけ、上の注記のかわりに出す（app.js が hidden を切り替える） -->
       <p class="note slip" id="slip-sample" hidden>これは<span class="nw">見本の番組</span>です。アプリに入っている、<span class="nw">つくりものの家族</span>の投稿と文を流しています（AI には送っていません）。</p>
     </section>
