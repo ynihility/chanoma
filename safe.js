@@ -323,7 +323,9 @@ const quoteForm = (s) => fold(s).replace(/[\p{P}\p{S}]/gu, '');
 
 // 1つの文を検査し、問題があれば理由を、なければ null を返す
 function wordProblem(s, ctx) {
-  if (INVISIBLE.test(s)) return '見えない文字や改行が混ざっている';
+  // 絵文字をつなぐ U+200D は、見えない文字に数えない（投稿の名前に使えるつないだ絵文字を、司会が名前のまま呼べるように）。
+  // 絵文字そのものは、このあとの記号の検査が弾く（投稿の名前の中にあるものだけ通る）。文字の間の U+200D などは、今までどおり弾く
+  if (INVISIBLE.test(s.replace(EMOJI_JOINER, '-'))) return '見えない文字や改行が混ざっている';
   const n = norm(s);
   const f = fold(s);
   // 区切りの記号や結合文字を除いた形。禁止語の検査はこちらに当てる

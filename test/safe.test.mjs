@@ -963,3 +963,54 @@ test('記号入りの名前: 名前に禁止語が入っていても、ほかの
   assert.equal(rank.ok, false);
   assert.match(rank.reason, /順位/);
 });
+
+// ---- 絵文字をつなぐ U+200D が入った名前を、司会が呼ぶ ----
+// つないだ絵文字（家族の絵文字など）は名前に使える。司会がその名前をそのまま呼んだ文は、見えない文字の検査でも弾かない。
+// 絵文字そのものは、記号の検査が今までどおり弾く（投稿の名前の中にあるものだけ通る）
+const FAMILY3 = joined(0x1F468, 0x1F469, 0x1F467); // 男・女・女の子の3人を U+200D でつないだ家族の絵文字
+const FAMILY3_BOY = joined(0x1F468, 0x1F469, 0x1F466); // 最後の1人だけちがう（男の子）家族の絵文字
+const PARTY_POPPER = emoji(0x1F389);
+for (const [label, people, hosts] of [
+  ['よびかたが「家族の絵文字＋ばあば」', [FAMILY3 + 'ばあば'], [FAMILY3 + 'ばあばのひとことです。']],
+  ['よびかたが家族の絵文字だけ', [FAMILY3], [FAMILY3 + 'のひとことです。']],
+  ['ニックネームが家族の絵文字', [{ who: 'まご', name: FAMILY3 }], [FAMILY3 + 'のひとことです。']],
+]) {
+  test(`通す(つないだ絵文字の名前): ${label}を、司会がそのまま呼ぶ`, () => {
+    const r = callPeople(people, hosts);
+    assert.equal(r.ok, true, r.reason);
+  });
+}
+test('つないだ絵文字の名前: 投稿の検査を通した名前を司会が呼んだ番組が通り、返す文にもつなぎの U+200D が残る', () => {
+  const cleaned = cleanPosts({ posts: [{ id: 'a', who: FAMILY3 + 'ばあば', topic: 'そら' }] });
+  assert.equal(cleaned.ok, true, cleaned.error);
+  const host = FAMILY3 + 'ばあばのひとことです。';
+  const news = { opening: 'こんばんは。', segments: [{ corner: 'ひとこと', from: 'a', host }], closing: 'おやすみなさい。' };
+  const r = checkNews(news, cleaned.posts);
+  assert.equal(r.ok, true, r.reason);
+  assert.equal(r.news.segments[0].host, host);
+});
+for (const [label, people, hosts] of [
+  ['投稿にない絵文字（パーティーのクラッカー）を足した', ['ばあば'], [PARTY_POPPER + 'ばあばのひとことです。']],
+  ['投稿にない家族の絵文字を足した', ['ばあば'], [FAMILY3 + 'ばあばのひとことです。']],
+  ['名前の家族の絵文字と、最後の1人だけちがう家族の絵文字', [FAMILY3 + 'ばあば'], [FAMILY3_BOY + 'ばあばのひとことです。']],
+  ['名前をそのまま呼んだあとに、投稿にない絵文字を足した', [FAMILY3 + 'ばあば'], [FAMILY3 + 'ばあば' + PARTY_POPPER + 'のひとことです。']],
+]) {
+  test(`弾く(つないだ絵文字の名前): ${label}`, () => {
+    const r = callPeople(people, hosts);
+    assert.equal(r.ok, false, '通ってしまった');
+    // 見えない文字の検査ではなく、記号の検査が弾く（絵文字そのものは、名前の中にあるものだけ通る）
+    assert.match(r.reason, /記号/);
+  });
+}
+for (const [label, people, host] of [
+  ['文字の間の U+200D', ['ばあば'], '次の' + ZWJ + '話です。'],
+  ['絵文字のあとに文字が続く U+200D', ['ばあば'], emoji(0x1F600) + ZWJ + '話です。'],
+  ['U+200D だけの文', ['ばあば'], ZWJ],
+  ['つないだ絵文字の名前を呼んだあとの ZWSP', [FAMILY3 + 'ばあば'], FAMILY3 + 'ばあば' + String.fromCodePoint(0x200B) + 'の話です。'],
+]) {
+  test(`弾く(司会の文の見えない文字): ${label}`, () => {
+    const r = callPeople(people, [host]);
+    assert.equal(r.ok, false, '通ってしまった');
+    assert.match(r.reason, /見えない文字/);
+  });
+}
