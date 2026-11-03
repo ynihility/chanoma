@@ -38,7 +38,7 @@ Tests: `node --test` (unit tests for the validation code).
 | Claude API | The server calls the Anthropic API only from `POST /api/news`. |
 | Browser speech recognition | Optional voice input uses the browser's Web Speech API. |
 
-There are no other external libraries, data, images or audio files. All pixel art is drawn in code from text maps (`sprites.js`), and all sound effects are synthesized with the Web Audio API (`sound.js`).
+There are no other external libraries, data, images or audio files. All pixel art is drawn in code from text maps (`sprites.js`), and all sound effects are synthesized with the Web Audio API (`sound.js`). The scene transitions are drawn on a canvas in code (`effects.js`) and the waiting screen is built with CSS; neither uses an external effect library, image or sound.
 
 Voice input note shown in the app: 「声は保存しません。音声認識はブラウザの機能で、提供元のサーバーに送られる場合があります。整えるために話の文章はClaudeに送ります。」
 
@@ -80,7 +80,7 @@ Node.js（v24 で確認）と、Anthropic の API キーが必要です。npm �
 
 ## 外部の素材
 
-上の英語の表のとおりです。同梱したフォントは Reggae One と DotGothic16 の2つで、どちらも SIL Open Font License 1.1 です。加工せず、配布元のファイルのまま配っています。ライセンス全文は `fonts/` に置いています。本文のフォントは端末にあるものを使うだけで、同梱していません。外部のライブラリ、データ、画像、音声ファイルはありません。ドット絵は `sprites.js` の文字の地図からコードで描き、効果音は Web Audio API で合成しています。
+上の英語の表のとおりです。同梱したフォントは Reggae One と DotGothic16 の2つで、どちらも SIL Open Font License 1.1 です。加工せず、配布元のファイルのまま配っています。ライセンス全文は `fonts/` に置いています。本文のフォントは端末にあるものを使うだけで、同梱していません。外部のライブラリ、データ、画像、音声ファイルはありません。ドット絵は `sprites.js` の文字の地図からコードで描き、効果音は Web Audio API で合成しています。場面の切り替えの演出は canvas（`effects.js`）、待ち画面は CSS で、どちらもコードから作っています。外部の演出ライブラリ・画像・音声は使っていません。
 
 ## 設計のルール
 
