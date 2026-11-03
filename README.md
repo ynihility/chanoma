@@ -64,7 +64,7 @@ The public form serves the app and the room API only. It does **not** serve the 
 | `CHANOMA_LOG_XFF` | optional, not set by default. When set to `1`, the server logs how many values `X-Forwarded-For` has, for the first 5 requests only (the IP values themselves are not logged). For checking the hop count |
 | `ANTHROPIC_API_KEY` | type it yourself into the host's environment-variable screen. Do not put it in the repository or give it to a tool |
 
-Behind a proxy, the server takes the client IP for its per-IP limits from `X-Forwarded-For`, counting `CHANOMA_TRUSTED_HOPS` values from the right (default 1; set it to the number of proxies in front of the server). Values a client prepends to that header are ignored, but if the hop count is wrong the per-IP limits (5 rooms a day, 60 reads and 60 writes a minute) can be bypassed or shared, so treat them as a guide. The caps that protect the cost do not depend on the IP: the shared program limits (10 a minute, 100 a day, 3 at once, 3 tries per room per day) and the server-wide room-creation limit (`CHANOMA_ROOMS_PER_HOUR`, default 20 an hour).
+Behind a proxy, the server takes the client IP for its per-IP limits from `X-Forwarded-For`, counting `CHANOMA_TRUSTED_HOPS` values from the right (default 1; set it to the number of proxies in front of the server; on Render's free tier the header held 3 values for a request that sent none, on 2026-11-04, so this deployment sets 3, and which value is the real client was not directly checked). Values a client prepends to that header are ignored, but if the hop count is wrong the per-IP limits (5 rooms a day, 60 reads and 60 writes a minute) can be bypassed or shared, so treat them as a guide. The caps that protect the cost do not depend on the IP: the shared program limits (10 a minute, 100 a day, 3 at once, 3 tries per room per day) and the server-wide room-creation limit (`CHANOMA_ROOMS_PER_HOUR`, default 20 an hour).
 
 Tests: `node --test`.
 
@@ -120,7 +120,8 @@ These are known and not fixed. They are listed so that you can decide whether Ch
 - **The free host may sleep.** The server keeps rooms in memory. If the host stops it, the server forgets, and the devices bring the programs back later.
 - **Per-IP limits are a guide.** The client IP comes from `X-Forwarded-For`, so it depends on the proxy setup (see above). The cost caps do not depend on it.
 - **A program keeps the day's posts.** The posts' text is deleted from the server the next morning, but the program made from them keeps a copy for as long as the room is used (see "Where your data goes").
-- **Memory on a free host is not measured.** With 100 rooms × 30 programs the server was measured at about 285 MB; whether the host's free tier allows that is not verified.
+- **Memory on a free host is not measured.** With 100 rooms × 30 programs the server was measured at about 285 MB on a development machine. The free tier of Render shows a memory limit of 512 MB, but its dashboard does not show the actual use on a free instance, so the use on the host is not verified.
+- **More than 30 saved posts on one device.** The room accepts 30 posts a day, but a device can also hold older posts that were written before it joined the room. When the saved list would pass 30, the app drops the oldest posts that the room cannot see, so that the saved data stays readable. Those posts are removed from the device without a message.
 
 ## Third-party materials
 
@@ -221,7 +222,7 @@ Node.js 20.19 以上が必要です（`AbortSignal.any` を使うため。確認
 | `CHANOMA_LOG_XFF` | 任意。ふだんは設定しません。`1` にすると、最初の5リクエストだけ、`X-Forwarded-For` の値の数を記録します（IP の値は記録しません）。段数の確認用です |
 | `ANTHROPIC_API_KEY` | 置き場所の環境変数の画面に、自分で入力します。リポジトリに入れたり、道具に渡したりしないでください |
 
-プロキシの後ろでは、IP ごとの上限に使うクライアントの IP を、`X-Forwarded-For` の右から `CHANOMA_TRUSTED_HOPS` 番目（既定 1。サーバーの前にある中継の数を入れます）から取ります。送る側がこのヘッダーの先頭に足した値は無視しますが、段数の設定が違うと IP ごとの上限（1日5部屋、1分60回の読み書き）は回避や共有が起こりうるので、目安と考えてください。費用を守る上限は IP に頼りません。全体の番組の枠（1分10回、1日100回、同時3つ、部屋ごと1日3回）と、サーバー全体の部屋作成の上限（`CHANOMA_ROOMS_PER_HOUR`、既定1時間20室）です。
+プロキシの後ろでは、IP ごとの上限に使うクライアントの IP を、`X-Forwarded-For` の右から `CHANOMA_TRUSTED_HOPS` 番目（既定 1。サーバーの前にある中継の数を入れます。Render の無料枠では、2026年11月4日に、ヘッダーを付けずに送った通信で、ヘッダーに3つの値が入っていました。そのため、この置き場所では 3 にしています。3つのうちどれが本当のお客さんの IP かは、直接は確かめていません）から取ります。送る側がこのヘッダーの先頭に足した値は無視しますが、段数の設定が違うと IP ごとの上限（1日5部屋、1分60回の読み書き）は回避や共有が起こりうるので、目安と考えてください。費用を守る上限は IP に頼りません。全体の番組の枠（1分10回、1日100回、同時3つ、部屋ごと1日3回）と、サーバー全体の部屋作成の上限（`CHANOMA_ROOMS_PER_HOUR`、既定1時間20室）です。
 
 テスト：`node --test`
 
@@ -277,7 +278,8 @@ Node.js 20.19 以上が必要です（`AbortSignal.any` を使うため。確認
 - **無料の置き場所は、止まることがあります。** サーバーは部屋をメモリに置いています。置き場所がサーバーを止めると、サーバーは忘れ、番組はあとで端末から戻ります。
 - **IP ごとの上限は目安です。** クライアントの IP は `X-Forwarded-For` から取るので、中継の設定に依存します（上の説明）。費用の上限は IP に頼りません。
 - **番組には、その日の投稿の写しが残ります。** 投稿の文は翌朝サーバーから消えますが、それから作った番組は、部屋が使われるあいだ写しを持ちます（「データの行き先」を参照）。
-- **無料の置き場所のメモリは測っていません。** 100部屋×30本で約285MBと測定しました。置き場所の無料枠で足りるかは未確認です。
+- **無料の置き場所のメモリは測っていません。** 100部屋×30本で、開発に使うパソコンでは約285MBと測定しました。Render の無料枠のメモリの上限は 512MB と表示されますが、無料の枠では実際の使用量が管理画面に出ないため、置き場所での使用量は未確認です。
+- **1台の端末に30件を超えて保存されるとき。** 部屋で受け付けるのは1日30件ですが、端末には、部屋に入る前に書いた古い投稿も残ります。保存する一覧が30件を超えそうなときは、保存したデータが読めなくならないよう、部屋から見えない古い投稿から消します。消えた投稿について、画面にお知らせは出ません。
 
 ## 外部の素材
 
