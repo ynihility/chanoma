@@ -913,3 +913,226 @@ test('room.js は、読み込んだだけではブラウザの部品に触らな
   assert.equal(typeof createRoomClient, 'function');
   assert.equal(typeof globalThis.window, 'undefined');
 });
+
+// ---- 作り直し・待ち時間・途中で部屋が変わったとき（実装レビュー1回目 Q2-01・02・07・11） ----
+
+// 返事を、テスト側が好きなときに返せる偽サーバー。handler が 'hold' を返した呼び出しは、release() まで返事を止める
+function gatedServer(handler) {
+  const calls = [];
+  const holds = [];
+  const fetch = async (url, init = {}) => {
+    const body = init.body === undefined ? undefined : JSON.parse(init.body);
+    const call = { method: init.method, path: url, body, signal: init.signal };
+    calls.push(call);
+    const r = handler(call);
+    if (r === 'hold') {
+      await new Promise((resolve) => holds.push(resolve));
+      return { status: 200, json: async () => okSync().body };
+    }
+    return { status: r.status, json: async () => r.body ?? null };
+  };
+  // 止めている返事を、すべて返す
+  const release = () => holds.splice(0).forEach((resolve) => resolve());
+  return { fetch, calls, release };
+}
+function gatedClient(server) {
+  return createRoomClient({ storage: memoryStorage(), fetch: server.fetch, subtle: crypto.webcrypto.subtle, randomValues: (a) => crypto.getRandomValues(a), origin: 'https://chanoma.example' });
+}
+// 止めた通信が fetch に届くまで、少し待つ
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+test('requeue: 部屋が見つからなくなって作り直したあと、きょうの投稿を新しい部屋に送り直す', async () => {
+  let lostRoom = false;
+  const server = fakeServer(({ method, path }) => {
+    if (method === 'POST' && path === '/api/room') return { status: 201, body: { code: OTHER } };
+    if (method === 'POST' && path.endsWith('/posts')) return { status: 200, body: {} };
+    if (lostRoom && path.includes(CODE)) return { status: 404, body: { error: 'x' } };
+    return okSync();
+  });
+  const { client } = newClient(server);
+  await client.enter(CODE);
+  lostRoom = true;
+  assert.equal((await client.sync()).lost, true);
+  assert.equal(client.isLost(), true);
+  assert.equal((await client.create()).ok, true);
+  assert.equal(client.pendingCount(), 0);
+  const r = client.requeue([goodPost('a1'), goodPost('a2')]);
+  assert.deepEqual(r, { ok: true, count: 2 });
+  assert.equal(client.pendingCount(), 2);
+  assert.equal(client.isMine('a1'), true);
+  server.calls.length = 0;
+  const synced = await client.sync();
+  assert.equal(synced.ok, true);
+  const posted = server.calls.filter((c) => c.method === 'POST' && c.path === `/api/room/${OTHER}/posts`);
+  assert.deepEqual(posted.map((c) => c.body.post.id), ['a1', 'a2']);
+  assert.equal(client.pendingCount(), 0);
+});
+
+test('requeue: 同じ id は1件だけ。壊れた投稿は捨てる。30件を超えない。部屋に入っていなければ ok:false', async () => {
+  const server = fakeServer(() => okSync());
+  const { client, storage } = newClient(server);
+  assert.deepEqual(client.requeue([goodPost('a1')]), { ok: false });
+  await client.enter(CODE);
+  assert.deepEqual(client.requeue([goodPost('a1'), goodPost('a1'), { id: 'x', who: '' }, null]), { ok: true, count: 1 });
+  assert.deepEqual(client.requeue([goodPost('a1')]), { ok: true, count: 0 });
+  assert.equal(client.pendingCount(), 1);
+  // 保存にも残る
+  assert.equal(JSON.parse(storage.getItem(ROOM_KEY)).pending.length, 1);
+  const many = Array.from({ length: 40 }, (_, i) => goodPost(`m${i}`));
+  client.requeue(many);
+  assert.equal(client.pendingCount(), 30);
+});
+
+test('requeue: ふつうの切り替え（lost でない）では、今までどおり持ち越されない', async () => {
+  const server = fakeServer(({ method, path }) => (method === 'POST' && path.endsWith('/posts') ? 'network' : okSync()));
+  const { client } = newClient(server);
+  await client.enter(CODE);
+  await client.post(goodPost('a1'));
+  assert.equal(client.pendingCount(), 1);
+  await client.enter(OTHER);
+  assert.equal(client.pendingCount(), 0);
+});
+
+test('enter: 404 のときだけ notFound:true。圏外や不調には付けない', async () => {
+  let status = 404;
+  const server = fakeServer(() => (status === 0 ? 'network' : { status, body: {} }));
+  const { client } = newClient(server);
+  const nf = await client.enter(CODE);
+  assert.equal(nf.ok, false);
+  assert.equal(nf.notFound, true);
+  assert.equal(client.inRoom(), false);
+  status = 503;
+  const bad = await client.enter(CODE);
+  assert.equal(bad.ok, false);
+  assert.equal('notFound' in bad, false);
+  status = 0;
+  const off = await client.enter(CODE);
+  assert.equal(off.ok, false);
+  assert.equal('notFound' in off, false);
+});
+
+test('待ち時間: create と enter は60秒、ほかの通信は15秒', async () => {
+  const given = [];
+  const realTimeout = AbortSignal.timeout;
+  // AbortSignal.timeout に渡された長さを記録する（信号そのものからは、長さが読めないため）
+  AbortSignal.timeout = (ms) => {
+    given.push(ms);
+    return realTimeout.call(AbortSignal, ms);
+  };
+  try {
+    const server = fakeServer(({ method, path }) => (method === 'POST' && path === '/api/room' ? { status: 201, body: { code: CODE } } : okSync()));
+    const { client } = newClient(server);
+    await client.create();
+    assert.deepEqual(given, [60_000]);
+    given.length = 0;
+    await client.enter(OTHER);
+    assert.deepEqual(given, [60_000]);
+    given.length = 0;
+    await client.sync();
+    assert.deepEqual(given, [15_000]);
+  } finally {
+    AbortSignal.timeout = realTimeout;
+  }
+});
+
+test('sync の途中で leave しても、例外は出ず ok:false が返る', async () => {
+  const server = gatedServer(({ method, path }) => (method === 'GET' && path.includes('since=0') && path.includes('/api/room/') ? 'hold' : { status: 200, body: {} }));
+  const client = gatedClient(server);
+  // enter の確認も止まるので、返してから進める
+  const entering = client.enter(CODE);
+  await tick();
+  server.release();
+  await entering;
+  const syncing = client.sync();
+  await tick();
+  client.leave();
+  server.release();
+  assert.deepEqual(await syncing, { ok: false });
+  assert.equal(client.inRoom(), false);
+});
+
+test('sync の途中で別の部屋に入ると、古い返事は捨てられ、新しい部屋の同期はそれを待たない', async () => {
+  let armed = false;
+  // 部屋 CODE の同期の返事だけ止める（部屋 OTHER への切り替えは、止めずに通す）
+  const server = gatedServer(({ method, path }) => (armed && method === 'GET' && path.startsWith(`/api/room/${CODE}?`) ? 'hold' : okSync()));
+  const client = gatedClient(server);
+  await client.enter(CODE);
+  armed = true;
+  const syncing = client.sync();
+  await tick();
+  await client.enter(OTHER);
+  // 新しい部屋の同期は、止まっている古い同期の結果を待たずに、自分の返事で終わる
+  const next = await client.sync();
+  assert.equal(next.ok, true);
+  assert.equal(next.count, 0);
+  server.release();
+  assert.deepEqual(await syncing, { ok: false });
+  assert.equal(client.code(), OTHER);
+  assert.equal(client.latePosts().length, 0);
+});
+
+test('古い部屋の返事の投稿（at 付き）は、切り替えたあとの roomPosts に入らない', async () => {
+  const stale = { day: TODAY, now: 1, posts: [{ ...goodPost('old1'), at: 5 }], ids: ['old1'], dates: [], program: null };
+  const holds = [];
+  const fetch = async (url, init = {}) => {
+    // 部屋 CODE の2回目の GET（sync）だけ、止めてから古い返事を返す
+    if (init.method === 'GET' && url === `/api/room/${CODE}?since=0` && holds.armed) {
+      await new Promise((resolve) => holds.push(resolve));
+      return { status: 200, json: async () => stale };
+    }
+    return { status: 200, json: async () => okSync().body };
+  };
+  const client = createRoomClient({ storage: memoryStorage(), fetch, subtle: crypto.webcrypto.subtle, randomValues: (a) => crypto.getRandomValues(a), origin: 'https://chanoma.example' });
+  await client.enter(CODE);
+  holds.armed = true;
+  const syncing = client.sync();
+  await tick();
+  assert.equal(holds.length, 1);
+  await client.enter(OTHER);
+  holds.splice(0).forEach((resolve) => resolve());
+  assert.deepEqual(await syncing, { ok: false });
+  assert.equal(client.latePosts().length, 0);
+  assert.equal(client.pendingCount(), 0);
+});
+
+test('投稿の途中で leave しても、例外は出ない（届いた返事は、部屋が変わったので使わない）', async () => {
+  const server = gatedServer(({ method, path }) => (method === 'POST' && path.endsWith('/posts') ? 'hold' : okSync()));
+  const client = gatedClient(server);
+  await client.enter(CODE);
+  const posting = client.post(goodPost('a1'));
+  await tick();
+  await tick();
+  client.leave();
+  server.release();
+  const r = await posting;
+  assert.equal(r.ok, false);
+  assert.equal(client.inRoom(), false);
+  assert.equal(client.isLost(), false);
+});
+
+test('未送信の投稿を送っている途中で別の部屋に入っても、古い部屋の 404 で新しい部屋が lost にならない', async () => {
+  let offline = true;
+  let gate = null;
+  const fetch = async (url, init = {}) => {
+    if (init.method === 'POST' && url === `/api/room/${CODE}/posts`) {
+      if (offline) throw new TypeError('fetch failed');
+      await new Promise((resolve) => { gate = resolve; });
+      return { status: 404, json: async () => ({}) };
+    }
+    return { status: 200, json: async () => okSync().body };
+  };
+  const client = createRoomClient({ storage: memoryStorage(), fetch, subtle: crypto.webcrypto.subtle, randomValues: (a) => crypto.getRandomValues(a), origin: 'https://chanoma.example' });
+  await client.enter(CODE);
+  await client.post(goodPost('a1'));
+  assert.equal(client.pendingCount(), 1);
+  offline = false;
+  const syncing = client.sync();
+  await tick();
+  await tick();
+  assert.equal(typeof gate, 'function');
+  await client.enter(OTHER);
+  gate();
+  assert.deepEqual(await syncing, { ok: false });
+  assert.equal(client.isLost(), false);
+  assert.equal(client.code(), OTHER);
+});

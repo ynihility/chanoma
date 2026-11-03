@@ -167,7 +167,7 @@ export async function hashDeviceKey(key, subtle) {
 
 const OFFLINE = 'つながりませんでした。つながっているか確かめて、もう一度お試しください。';
 const GENERIC = 'うまく動きませんでした。もう一度お試しください。';
-const LOST = 'この部屋は、サーバーに見つかりません。しばらく使われなかったか、サーバーが入れ替わったようです。新しい部屋を作って、招待を送り直してください。投稿と本棚は、この端末に残っています。';
+const LOST = 'この部屋は、サーバーに見つかりません。しばらく使われなかったか、サーバーが入れ替わったようです。新しい部屋を作って、招待を送り直してください。きょうの投稿は、新しい部屋に自動で送り直します。本棚は、この端末に残っています。';
 // 送り直してよい失敗（通信の失敗・混み合い・サーバーの不調）。それ以外の断りは、送り直しても同じなので、理由を出して止める
 const isRetryable = (status) => status === 0 || status === 429 || status >= 500;
 
@@ -235,6 +235,8 @@ export function createRoomClient(env = {}) {
   let todayProgram = null;
   let lost = false;
   let syncing = null;
+  // 動いている同期が、どの部屋のものか（部屋が変わったあと、古い同期の結果を待たせないため）
+  let syncingFor = null;
   let exchanged = false;
 
   function persist() {
@@ -328,8 +330,12 @@ export function createRoomClient(env = {}) {
   // ---- 投稿 ----
   // 投稿を1件送る。結果は 'sent'（届いた）・'retry'（あとで送り直す）・'rejected'（断られた。error と reason を添える）
   async function sendPost(post) {
+    // 通信のあいだに部屋を出た・切り替えたとき、古い部屋の返事で、いまの部屋の状態（lost など）を書き換えないため、最初の部屋を持っておく
+    const mine = rec;
     const device = await deviceHash();
-    const r = await call('POST', `/api/room/${rec.code}/posts`, { body: { post, device } });
+    if (rec !== mine) return { kind: 'retry' };
+    const r = await call('POST', `/api/room/${mine.code}/posts`, { body: { post, device } });
+    if (rec !== mine) return { kind: 'retry' };
     if (r.status === 200) return { kind: 'sent' };
     if (isRetryable(r.status)) return { kind: 'retry' };
     if (r.status === 404) {
@@ -378,7 +384,8 @@ export function createRoomClient(env = {}) {
     async create() {
       const reason = unsupported();
       if (reason) return { ok: false, error: reason };
-      const r = await call('POST', '/api/room', { body: {} });
+      // 置き場所が止まっていると、起きるまで1分ほどかかるので、ほかの通信より長く待つ
+      const r = await call('POST', '/api/room', { body: {}, timeoutMs: 60_000 });
       if (r.status === 201 && isRoomCode(r.data?.code)) {
         setRoom(r.data.code);
         return { ok: true };
@@ -391,12 +398,32 @@ export function createRoomClient(env = {}) {
       if (reason) return { ok: false, error: reason };
       if (!isRoomCode(code)) return { ok: false, error: '部屋のコードの形が正しくありません。もう一度、確かめてください。' };
       if (rec?.code === code) return { ok: true, same: true };
-      const r = await call('GET', `/api/room/${code}?since=0`);
+      // create と同じ理由で、1分まで待つ
+      const r = await call('GET', `/api/room/${code}?since=0`, { timeoutMs: 60_000 });
       if (r.status === 200) {
         setRoom(code);
         return { ok: true };
       }
-      return { ok: false, error: r.status === 404 ? 'この部屋は見つかりません。コードを確かめてください。' : errorOf(r) };
+      // 404 は、コードの打ち間違いとは限らない（招待が古いこともある）ので、画面が文を選べるよう印を付ける
+      if (r.status === 404) return { ok: false, notFound: true, error: 'この部屋は見つかりません。コードを確かめてください。' };
+      return { ok: false, error: errorOf(r) };
+    },
+    // 部屋が見つからなくなって作り直したとき、きょうの自分の投稿を新しい部屋へ送り直すために使う。ふつうの切り替えでは呼ばない
+    // （setRoom は、別の家族の部屋へ投稿を持ち越さないよう未送信を空にする。作り直しのときだけ、呼ぶ側が選んで足す）
+    requeue(posts) {
+      if (!rec) return { ok: false };
+      const have = new Set(rec.pending.map((p) => p.id));
+      let count = 0;
+      for (const raw of Array.isArray(posts) ? posts : []) {
+        const c = cleanPost(raw);
+        if (c.ok && !have.has(c.post.id)) {
+          have.add(c.post.id);
+          rec.pending = [...rec.pending, c.post].slice(0, 30);
+          count++;
+        }
+      }
+      persist();
+      return { ok: true, count };
     },
     // 部屋を出る（コードを忘れる）。投稿と本棚は、この端末に残す
     leave() {
@@ -413,7 +440,10 @@ export function createRoomClient(env = {}) {
       if (reason) return { ok: false, error: reason };
       const cleaned = cleanPost(post);
       if (!cleaned.ok) return { ok: false, error: cleaned.error };
+      const mine = rec;
       const result = await sendPost(cleaned.post);
+      // 通信のあいだに部屋が変わったときは、もとの部屋へは送れていない（投稿は、この端末の保存に残っている）
+      if (rec !== mine) return { ok: false, error: '部屋が変わったため、送れませんでした。' };
       if (result.kind === 'rejected') return { ok: false, error: result.error, ...(result.reason ? { reason: result.reason } : {}), ...(lost ? { lost: true } : {}) };
       if (result.kind === 'sent') {
         rememberSent(cleaned.post.id);
@@ -447,12 +477,20 @@ export function createRoomClient(env = {}) {
     // 部屋の新しい投稿と、番組のようすを取りに行く。重なって呼ばれたら、動いているものの結果を待つ
     sync() {
       if (!rec) return Promise.resolve({ ok: false });
-      syncing ??= (async () => {
+      // 別の部屋の同期が動いているときは、その結果を待たず、いまの部屋の同期を始める
+      if (syncing && syncingFor !== rec) syncing = null;
+      if (syncing) return syncing;
+      const mine = rec;
+      syncingFor = mine;
+      const run = (async () => {
         const reason = unsupported();
         if (reason) return { ok: false, error: reason };
         const dropped = await flushPending();
+        // 通信のあいだに部屋を出た・切り替えたときは、古い部屋の返事を、いまの部屋の状態に入れない
+        if (rec !== mine) return { ok: false };
         if (lost) return { ok: false, lost: true, error: LOST, dropped };
-        const r = await call('GET', `/api/room/${rec.code}?since=${since}`);
+        const r = await call('GET', `/api/room/${mine.code}?since=${since}`);
+        if (rec !== mine) return { ok: false };
         if (r.status === 404) {
           lost = true;
           return { ok: false, lost: true, error: LOST, dropped };
@@ -489,9 +527,10 @@ export function createRoomClient(env = {}) {
         const badProgram = Boolean(d.program) && !takeProgram(d.program);
         return { ok: true, day: d.day, count: live.size + rec.pending.length, program: todayProgram, badProgram, late: latePosts(), dates: serverDates, dropped, goneIds };
       })().finally(() => {
-        syncing = null;
+        if (syncing === run) syncing = null;
       });
-      return syncing;
+      syncing = run;
+      return run;
     },
 
     // 夜7時: きょうの番組を取る。すでにあればそれを返し（made:false）、なければサーバーに作ってもらう。
