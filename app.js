@@ -113,10 +113,24 @@ let ready = null;
 // 待ちが長いときに、待ち画面の一言を替えるためのタイマー
 let waitTimer = 0;
 
+// 下の案内（「おくる」ボタンの近く）。出すときは上の案内を片づける（古い案内と並んで出ないように）
 function say(message) {
+  clearTop();
   $('msg').textContent = message;
   // 操作した場所から離れた所にメッセージが出るので、見える位置まで画面を動かす
   if (message) $('msg').scrollIntoView({ block: 'nearest' });
+}
+
+// 上の案内（よびかたのボタンと「夜7時にする」のすぐ下）。おくったあとや、夜7時にできないときに出す。
+// 下の案内は片づける。画面は動かさない（押したボタンの近くに出るので、そのまま見える）
+function sayTop(message) {
+  $('msg').textContent = '';
+  $('top-msg').textContent = message;
+  $('top-msg').hidden = !message;
+}
+function clearTop() {
+  $('top-msg').textContent = '';
+  $('top-msg').hidden = true;
 }
 
 // 保存できたら true。使えない環境や容量いっぱいのときは false
@@ -378,9 +392,23 @@ function submitPost() {
   pick.topic = pick.card = pick.headline = '';
   $('text').value = '';
   $('wish-date').value = '';
-  say(saved ? 'おくりました。' : 'おくりました。ただし、この端末には保存できませんでした。画面を閉じると消えます。');
+  sayTop(saved ? 'おくりました。つぎの人に切り替えて、送れます。' : 'おくりました。ただし、この端末には保存できませんでした。画面を閉じると消えます。');
   renderForm();
   renderPosts();
+  returnToTop(Boolean(post.animal));
+}
+
+// 送ったあと、画面を先頭（よびかたのボタンが見える所）へ戻す。動物がはずむ（.hop）あいだは少し待ち、見せてから戻す。
+// そのあいだに本人が画面を動かしていたり、放送の画面に移っていたりしたら、戻さない
+const HOP_WAIT_MS = 800;
+function returnToTop(hasHop) {
+  const y = window.scrollY;
+  const go = () => {
+    if ($('post-view').hidden || Math.abs(window.scrollY - y) >= 8) return;
+    window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  };
+  if (hasHop && !prefersReducedMotion()) setTimeout(go, HOP_WAIT_MS);
+  else go();
 }
 
 // つぎに会う日を決める。投稿が0件でも保存できるように、日付だけを検査する
@@ -427,6 +455,7 @@ function setView(onAir) {
   // 押したボタンは隠れるので、フォーカスを新しい画面に移す（キーボードや読み上げの人が迷子にならないように）。
   // テレビのほうは、フォーカスで勝手に動かさず、tvToTop で先頭へ寄せる
   if (onAir) {
+    clearTop();
     $('screen').focus({ preventScroll: true });
     tvToTop();
   } else {
@@ -664,7 +693,8 @@ function fail(message) {
 async function goEvening() {
   cancelVoice();
   if (state.posts.length === 0) {
-    say('投稿が1件以上あると、番組を作れます。');
+    // 押したボタンの近く（上）に、読める大きさで出す
+    sayTop('投稿が1件以上あると、番組を作れます。');
     return;
   }
   // 番組ができていて、投稿も変わっていなければ、作り直さずにそのまま見せる

@@ -322,6 +322,23 @@
     /* 注記や案内の文は、対応しているブラウザでは文節のところで改行する（「ブ／ラウザ」のように語の途中で割れにくくなる） */
     .note, .msg, .label, summary { word-break: auto-phrase; }
 
+    /* 上の案内: よびかたのボタンと「夜7時にする」のすぐ下に、紙の短冊で出す。左の朱の帯で、お知らせだと分かるようにする */
+    .top-live { max-width: 880px; margin: 0 auto; padding: 0 var(--gap-4); }
+    .top-msg {
+      margin: var(--gap-4) 0 0;
+      padding: var(--gap-3) var(--gap-4);
+      font-weight: 700;
+      line-height: 1.5;
+      color: var(--ink);
+      background: var(--paper);
+      border: 3px solid var(--ink);
+      border-left: 14px solid var(--shu);
+      border-radius: 4px;
+      box-shadow: var(--drop);
+      overflow-wrap: anywhere;
+      word-break: auto-phrase;
+    }
+
     /* 画面の読み上げだけに出す文字（見た目には出さない） */
     .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
@@ -852,6 +869,7 @@
       #sound { order: 2; margin-left: auto; }
       #roles { order: 3; flex-basis: 100%; gap: var(--gap-2); margin-bottom: 0; }
       #evening { order: 4; }
+      .top-live { padding: 0 var(--gap-3); }
       .shoji { min-height: 60px; padding: var(--gap-1) var(--gap-3) 0; }
       main { padding: var(--gap-5) var(--gap-3) 56px; }
       .panel { border-width: 8px; padding: var(--gap-4); }
@@ -947,6 +965,9 @@
     <button id="sound" type="button">音を消す</button>
     <button id="evening" class="primary">夜7時にする</button>
   </header>
+
+  <!-- 上の案内（おくったあと・夜7時にできないとき）。読み上げの入れ物は、はじめから置いておく -->
+  <div class="top-live" role="status"><p id="top-msg" class="top-msg" hidden></p></div>
 
   <!-- 障子の帯。app.js が data-sprite の場所にドット絵を入れる（飾りなので読み上げない） -->
   <div class="shoji" aria-hidden="true">
