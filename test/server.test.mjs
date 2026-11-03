@@ -411,6 +411,14 @@ for (const p of ['/.env', '/server.mjs', '/prompt.txt', '/.git/config', '/../ser
 }
 r = await call('GET', '/');
 check('配る: / は index.html', r.status === 200 && r.text.includes('<'), String(r.status));
+// 見本の番組（sample.js）が配られる。画面が読み込むようになったあとは、下の「画面が読み込む JS」の確かめにも自動で入る
+const sampleRes = await fetch(`http://127.0.0.1:${APP_PORT}/sample.js`);
+const sampleBody = await sampleRes.text();
+check(
+  '配る: /sample.js -> 200 text/javascript（見本の番組が入っている）',
+  sampleRes.status === 200 && (sampleRes.headers.get('content-type') || '').startsWith('text/javascript') && sampleBody.includes('SAMPLE_NEWS'),
+  `${sampleRes.status} ${sampleRes.headers.get('content-type')}`,
+);
 // 画面が読み込む JS を index.html と import からたどり、すべて配られていることを確かめる。
 // サーバーの一覧（STATIC_FILES）への足し忘れで、演出などが黙って動かなくなるのを防ぐため
 const pageScripts = new Set();

@@ -29,6 +29,7 @@ const STATIC_FILES = {
   '/sprites.js': ['sprites.js', 'text/javascript; charset=utf-8'],
   '/pixel.js': ['pixel.js', 'text/javascript; charset=utf-8'],
   '/effects.js': ['effects.js', 'text/javascript; charset=utf-8'],
+  '/sample.js': ['sample.js', 'text/javascript; charset=utf-8'],
   // 同梱フォントと、そのライセンス全文（OFL では、フォントと一緒にライセンスを配る決まり）
   '/fonts/ReggaeOne-Regular.ttf': ['fonts/ReggaeOne-Regular.ttf', 'font/ttf'],
   '/fonts/DotGothic16-Regular.ttf': ['fonts/DotGothic16-Regular.ttf', 'font/ttf'],
