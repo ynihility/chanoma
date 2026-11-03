@@ -685,6 +685,9 @@ function showError(message) {
 const WAIT_NOTE = 'できるまで、少しお待ちください。';
 const WAIT_NOTE_LONG = 'すこし時間がかかっています。もうしばらく、お待ちください。';
 function showWaiting() {
+  // 演出の最中なら、先に終わらせる（いまの場面の入れ替えまで済ませる）。表示を替える前にしないと、
+  // 空にした show を使って入れ替えようとして、例外で「準備中」のまま固まる
+  cancelFx();
   show = { steps: [], index: 0 };
   $('next').hidden = true;
   $('retry').hidden = true;

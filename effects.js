@@ -219,19 +219,27 @@ export function playWipe(screen, kind, swap) {
   function doSwap() {
     if (swapped) return false;
     swapped = true;
-    swap();
-    w = screen.clientWidth;
-    h = screen.clientHeight;
-    if (canvas.width !== w || canvas.height !== h) {
-      canvas.width = w;
-      canvas.height = h;
+    // 入れ替えの途中で例外が出ても、四角（canvas）が画面に残ったり、演出の終わりを待つ側が固まったりしないよう、
+    // 最後まで行かなかったときは、必ず finish() を通して片づける（例外そのものは、そのまま呼び出し元へ返す）
+    let ok = false;
+    try {
+      swap();
+      w = screen.clientWidth;
+      h = screen.clientHeight;
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+      const next = makeGrid(w, h, cfg.cell);
+      // 並びが変わった（中身の高さが変わった）ときは、前の色を新しい並びに写して、そこから新しい色へ移り変わらせる
+      if (next.cols !== grid.cols || next.rows !== grid.rows) colorsFrom = resample(grid, colorsFrom, next, mix(crt, mid, 0.5));
+      grid = next;
+      colorsTo = colorsOf(grid);
+      delayOut = DELAYS[cfg.reveal](grid).map((d) => d * cfg.revealSpread);
+      ok = true;
+    } finally {
+      if (!ok) finish();
     }
-    const next = makeGrid(w, h, cfg.cell);
-    // 並びが変わった（中身の高さが変わった）ときは、前の色を新しい並びに写して、そこから新しい色へ移り変わらせる
-    if (next.cols !== grid.cols || next.rows !== grid.rows) colorsFrom = resample(grid, colorsFrom, next, mix(crt, mid, 0.5));
-    grid = next;
-    colorsTo = colorsOf(grid);
-    delayOut = DELAYS[cfg.reveal](grid).map((d) => d * cfg.revealSpread);
     return true;
   }
 
