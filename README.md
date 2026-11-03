@@ -93,7 +93,7 @@ your device  ->  the Chanoma server  ->  Anthropic API (Claude)
 - **Voice input** is optional and only a helper: you check the text before sending. The app shows: 「声は保存しません。音声認識はブラウザの機能で、提供元のサーバーに送られる場合があります。整えるために話の文章はClaudeに送ります。」 The speech recognition is the browser's own feature, and the browser's provider may receive the voice.
 - **Posts** are kept on the server only for that day. They are deleted the next morning at 4:00 JST. They stay on the device that wrote them.
 - **Programs** stay on the server until the room has not been used for 3 days, and can come back from a family member's device through the shelf. If every device has deleted a program and the server has forgotten it, it is gone.
-- **At Anthropic**: according to Anthropic's published documentation (retrieved 2026-11-03), API inputs and outputs are deleted after 30 days by default. This project does **not** use zero data retention (ZDR).
+- **At Anthropic**: according to Anthropic's published documentation (retrieved 2026-11-03; <https://platform.claude.com/docs/en/manage-claude/api-and-data-retention>), API inputs and outputs are deleted after 30 days by default. This project does **not** use zero data retention (ZDR).
 - **Purpose**: the posts are used only to make the program. They are not used for anything else, and there are no rankings, ads or public pages.
 - **Server location**: if you host on Render, the server runs outside Japan (Singapore), and the hosting company may keep access logs. The Chanoma server logs only the first 4 letters of a room code and never the posts.
 
@@ -244,7 +244,7 @@ Node.js 20 以上が必要です（`AbortSignal.any` を使うため。確認し
 - **音声入力**は、任意の補助です。送る前に、必ず文字で確かめます。アプリには「声は保存しません。音声認識はブラウザの機能で、提供元のサーバーに送られる場合があります。整えるために話の文章はClaudeに送ります。」と出します。音声認識はブラウザ自身の機能で、声はブラウザの提供元が受け取ることがあります。
 - **投稿**は、サーバーにはその日の分だけ置き、翌朝4:00（日本時間）に消します。書いた端末には残ります。
 - **番組**は、部屋が3日使われないまで、サーバーに残ります。家族の端末から、本棚を通して戻ることもあります。すべての端末から消え、サーバーも忘れたら、その番組はなくなります。
-- **Anthropic では**、Anthropic の公式の説明（2026年11月3日に取得）によると、API の入力と出力は、既定で30日後に削除されます。このプロジェクトは、ゼロデータ保持（ZDR）では**ありません**。
+- **Anthropic では**、Anthropic の公式の説明（2026年11月3日に取得。<https://platform.claude.com/docs/en/manage-claude/api-and-data-retention>）によると、API の入力と出力は、既定で30日後に削除されます。このプロジェクトは、ゼロデータ保持（ZDR）では**ありません**。
 - **利用の目的**：投稿は、番組を作ることだけに使います。ほかの目的には使いません。ランキング、広告、公開のページはありません。
 - **サーバーの場所**：Render に置くと、サーバーは日本の外（シンガポール）にあり、運営側にアクセスの記録が残ることがあります。ちゃのまのサーバーは、記録に部屋のコードの先頭4字だけを出し、投稿の文は出しません。
 
