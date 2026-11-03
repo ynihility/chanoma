@@ -55,9 +55,14 @@
        どちらも加工せず、配布元のファイル（TTF）をそのまま配っている。 */
     @font-face { font-family: "Reggae One"; src: url("fonts/ReggaeOne-Regular.ttf") format("truetype"); font-display: swap; }
     @font-face { font-family: "DotGothic16"; src: url("fonts/DotGothic16-Regular.ttf") format("truetype"); font-display: swap; }
+    /* 題字の書体 ChanomaDot（作者の自作。12×16 のドット、51字）。ライセンスは fonts/LICENSE-ChanomaDot.txt。
+       題字（アプリ名、テレビの中の見出し、コーナーの見出し）だけに使う。字が無い文字が混ざる所には使わない。
+       1ドットは「文字の大きさ ÷ 16」px なので、大きさは 16px の整数倍（32px、48px）にする。 */
+    @font-face { font-family: "ChanomaDot"; src: url("fonts/ChanomaDot-Regular.ttf") format("truetype"); font-display: swap; }
     :root {
       --font-head: "Reggae One", "Yu Gothic UI", "Hiragino Sans", "Noto Sans JP", "Meiryo", sans-serif;
       --font-dot: "DotGothic16", "MS Gothic", "Osaka-Mono", monospace;
+      --font-title: "ChanomaDot", "DotGothic16", "MS Gothic", "Osaka-Mono", monospace;
     }
 
     * { box-sizing: border-box; }
@@ -96,11 +101,11 @@
       position: relative;
       margin: 0 var(--gap-2) 0 0;
       padding: var(--gap-1) var(--gap-5) var(--gap-1) var(--gap-4);
-      font-family: var(--font-head);
-      font-size: 40px;
-      font-weight: 800;
+      font-family: var(--font-title);
+      font-size: 48px;
+      font-weight: 400;
       line-height: 1.3;
-      letter-spacing: 0.2em;
+      letter-spacing: 9px;
       color: var(--ink);
       background: var(--paper);
       border: 4px solid var(--ink);
@@ -635,12 +640,19 @@
       display: inline-block;
       margin: 0 0 var(--gap-4);
       padding-bottom: var(--gap-1);
+      font-family: var(--font-title);
+      font-size: 32px;
+      font-weight: 400;
+      letter-spacing: 4px;
+      color: var(--yamabuki);
+      border-bottom: 4px solid var(--yamabuki);
+    }
+    /* ChanomaDot に無い字が入る題字（「番組を作れませんでした」など）は、いつもの見出しの書体のまま */
+    .screen .corner.plain {
       font-family: var(--font-head);
       font-size: 28px;
       font-weight: 800;
       letter-spacing: 0.12em;
-      color: var(--yamabuki);
-      border-bottom: 4px solid var(--yamabuki);
     }
     /* 画面に出す言葉は、2種類に見た目を分ける。形と札でも見分けられるようにして、色だけに頼らない。
        ・司会「テレ吉」（AI が考えた言葉）のつなぎの言葉 = テレ吉の吹き出し。中に「テレ吉」の札が付く
@@ -739,11 +751,11 @@
     .screen .lineup-item { padding-left: var(--gap-3); border-left: 6px solid var(--yamabuki); }
     .screen .lineup-title {
       margin: 0 0 var(--gap-1);
-      font-family: var(--font-head);
-      font-size: 26px;
-      font-weight: 800;
+      font-family: var(--font-title);
+      font-size: 32px;
+      font-weight: 400;
       line-height: 1.5;
-      letter-spacing: 0.08em;
+      letter-spacing: 3px;
       color: var(--yamabuki);
     }
     /* わけの文は、1つの箱（.nw）に入っている。札と同じ行に入りきらないときは、文ごと次の行へ移るので、札の後ろで語の途中から折れない */
@@ -947,7 +959,7 @@
       /* ヘッダー: 上の段に題字と「音を消す」、つぎの段によびかた、いちばん下に「夜7時にする」を並べる。
          文字を 24px にしても、ヘッダーが高くなりすぎないようにするため */
       header { padding: var(--gap-3) var(--gap-3) var(--gap-4); }
-      h1 { order: 1; margin-right: 0; font-size: 28px; letter-spacing: 0.12em; }
+      h1 { order: 1; margin-right: 0; font-size: 32px; letter-spacing: 4px; }
       .spacer { display: none; }
       #sound { order: 2; margin-left: auto; }
       #roles { order: 3; flex-basis: 100%; gap: var(--gap-2); margin-bottom: 0; }

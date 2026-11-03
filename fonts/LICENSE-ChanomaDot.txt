@@ -1,0 +1,30 @@
+ChanomaDot (ChanomaDot-Regular.ttf)
+Copyright (c) 2026 ynihility. All rights reserved.
+
+ChanomaDot is a dot-style typeface that ynihility drew by hand in 2026
+for the title lettering of "Chanoma" (ちゃのま).
+
+It is included in this repository only so that Chanoma can display its titles.
+It is NOT covered by the MIT License of the code (see ../LICENSE), and it is
+NOT released under the SIL Open Font License.
+
+Not permitted without the author's written permission:
+  - reuse in any other work or product
+  - redistribution, in whole or in part, alone or bundled
+  - modification, conversion, or creation of derivative fonts
+
+---
+
+ChanomaDot（ChanomaDot-Regular.ttf）
+Copyright (c) 2026 ynihility. All rights reserved.
+
+ChanomaDot は、ynihility が 2026 年に手で描いた、ドット風の書体です。
+「ちゃのま」の題字を表示するために作りました。
+
+このアプリ（ちゃのま）が題字を表示するためだけに、このリポジトリに同梱しています。
+コードの MIT ライセンス（../LICENSE）の対象ではなく、SIL Open Font License でもありません。
+
+作者の書面による許可がないかぎり、次のことは許可しません。
+  - 他の作品・製品での再利用
+  - 再配布（一部だけ、単独、同梱のいずれも）
+  - 改変、形式の変換、派生した書体の作成

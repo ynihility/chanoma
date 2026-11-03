@@ -923,7 +923,10 @@ function showError(message) {
   const reason = message.startsWith(FAIL_HEAD) ? message.slice(FAIL_HEAD.length) : message;
   // アプリ自身のお知らせなので、AI の吹き出し（host）にはしない
   const wrap = el('div', undefined, 'fade');
-  wrap.append(titleLine(['番組を', '作れませんでした']));
+  // この題字には ChanomaDot に無い字が入るので、題字の書体は使わない（.plain）
+  const failTitle = titleLine(['番組を', '作れませんでした']);
+  failTitle.classList.add('plain');
+  wrap.append(failTitle);
   if (reason) {
     const why = el('p', undefined, 'notice');
     why.append(...guard(reason));

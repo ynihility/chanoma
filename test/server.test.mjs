@@ -494,7 +494,7 @@ r = await call('POST', '/api/news', { posts });
 check('混雑のあとも、また 200 に戻る（カウンタが戻っている）', r.status === 200, `${r.status}`);
 
 // --- 同梱フォントの配信 ---
-for (const [p, type] of [['/fonts/ReggaeOne-Regular.ttf', 'font/ttf'], ['/fonts/DotGothic16-Regular.ttf', 'font/ttf'], ['/fonts/OFL-ReggaeOne.txt', 'text/plain'], ['/fonts/OFL-DotGothic16.txt', 'text/plain']]) {
+for (const [p, type] of [['/fonts/ReggaeOne-Regular.ttf', 'font/ttf'], ['/fonts/DotGothic16-Regular.ttf', 'font/ttf'], ['/fonts/ChanomaDot-Regular.ttf', 'font/ttf'], ['/fonts/OFL-ReggaeOne.txt', 'text/plain'], ['/fonts/OFL-DotGothic16.txt', 'text/plain'], ['/fonts/LICENSE-ChanomaDot.txt', 'text/plain']]) {
   const x = await fetch(`http://127.0.0.1:${APP_PORT}${p}`);
   const body = await x.arrayBuffer();
   check(`配る: ${p} -> 200 ${type}`, x.status === 200 && (x.headers.get('content-type') || '').startsWith(type) && body.byteLength > 1000, `${x.status} ${x.headers.get('content-type')} ${body.byteLength}`);
