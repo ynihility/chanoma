@@ -828,8 +828,9 @@ check('試行の上限: 別の日になれば、数え直されて作れる', r.
 await stopApp(app);
 
 // 4-2. 1秒で1日進む。掃除のタイマーは止めて、部屋を作るときの「古い部屋を消す」道だけを確かめる
+// ここで作る100室は空なので、空の部屋のかたづけ（既定6時間＝この速さで約0.25秒）は長くして、3日の扱いだけを確かめる
 app = startApp({
-  CHANOMA_FAKE_NOW: FAKE_NOW, CHANOMA_FAKE_SPEED: '86400', CHANOMA_SWEEP_MS: '3600000000',
+  CHANOMA_FAKE_NOW: FAKE_NOW, CHANOMA_FAKE_SPEED: '86400', CHANOMA_SWEEP_MS: '3600000000', CHANOMA_EMPTY_ROOM_TTL_MS: '3600000000',
   CHANOMA_ROOMS_PER_IP_PER_DAY: '1000', CHANOMA_ROOM_READS_PER_MINUTE: '100000', CHANOMA_ROOM_WRITES_PER_MINUTE: '100000',
 });
 await waitReady();
@@ -852,24 +853,62 @@ r = await getRoom(many[0]);
 check('古い部屋: 消された部屋は 404', r.status === 404, String(r.status));
 await stopApp(app);
 
-// 4-3. 掃除のタイマーが、3日さわられていない部屋を消す。さわり続けた部屋は残る
+// 4-3. 掃除のタイマーが、3日さわられていない部屋を消す。さわり続けた（投稿し続けた）部屋は残る。
+// 「さわった」に数えるのは、投稿・番組づくり・本棚の差し出しだけ。読み（GET）を続けても、部屋は残らない。
+// 3つの部屋とも、はじめに1件投稿して「一度でも投稿があった部屋」にしておく（空の部屋のかたづけは 4-4 で確かめる）
 app = startApp({
   CHANOMA_FAKE_NOW: FAKE_NOW, CHANOMA_FAKE_SPEED: '86400', CHANOMA_SWEEP_MS: '200',
   CHANOMA_ROOM_READS_PER_MINUTE: '100000', CHANOMA_ROOM_WRITES_PER_MINUTE: '100000',
 });
 await waitReady();
 const roomIdle = await newRoom();
+const roomRead = await newRoom();
 const roomBusy = await newRoom();
+const keyBusy = newDevice();
+await sendPost(roomIdle, A, newDevice());
+await sendPost(roomRead, A, newDevice());
+await sendPost(roomBusy, { ...A, id: 'busy0' }, keyBusy);
 const t0 = Date.now();
+let lastBusyPost = Date.now();
+let busyCount = 1;
+let busyBad = 0;
 while (Date.now() - t0 < 4200) {
-  await getRoom(roomBusy);
+  await getRoom(roomRead);
+  // 投稿は約1秒（＝1日）ごと。端末ごとの1分10件の上限には届かない
+  if (Date.now() - lastBusyPost >= 1000) {
+    const x = await sendPost(roomBusy, { ...A, id: `busy${busyCount++}` }, keyBusy);
+    if (x.status !== 200) busyBad++;
+    lastBusyPost = Date.now();
+  }
   await wait(300);
 }
 r = await getRoom(roomIdle);
 check('掃除: 3日さわられていない部屋は、タイマーが消す（404）', r.status === 404, String(r.status));
+r = await getRoom(roomRead);
+check('掃除: 読み（GET）を続けるだけでは、さわったことにならず、3日で消える（404）', r.status === 404, String(r.status));
 r = await getRoom(roomBusy);
-check('掃除: さわり続けた部屋は残る（200）', r.status === 200, String(r.status));
+check('掃除: 投稿し続けた部屋は残る（200）', r.status === 200 && busyBad === 0, `${r.status} 投稿の失敗 ${busyBad} 件`);
 check('掃除: 消した部屋の数がログに出る', /使われていない部屋 [1-9]\d* 室/.test(app.log), app.log.slice(-300));
+await stopApp(app);
+
+// 4-4. まだ一度も投稿も番組もない部屋は、既定の6時間（この速さで約0.25秒）でかたづける。
+// 一度でも投稿があった部屋は、朝 4:00 の掃除で投稿が消えても、6時間ではかたづけない（3日の扱いのまま）
+app = startApp({
+  CHANOMA_FAKE_NOW: FAKE_NOW, CHANOMA_FAKE_SPEED: '86400', CHANOMA_SWEEP_MS: '200',
+  CHANOMA_ROOM_READS_PER_MINUTE: '100000', CHANOMA_ROOM_WRITES_PER_MINUTE: '100000',
+});
+await waitReady();
+const roomNeverUsed = await newRoom();
+const roomUsed = await newRoom();
+r = await sendPost(roomUsed, A, newDevice());
+const usedPostStatus = r.status;
+// 約1.2日進める（6時間より長く、3日より短い。間に朝 4:00 をはさむ）
+await wait(1200);
+r = await getRoom(roomNeverUsed);
+check('空の部屋: 一度も投稿も番組もない部屋は、6時間たつとかたづけられる（404）', r.status === 404, String(r.status));
+r = await getRoom(roomUsed);
+check('空の部屋: 一度でも投稿があった部屋は、朝の掃除で投稿が消えても残る（200、投稿は0件）',
+  usedPostStatus === 200 && r.status === 200 && r.json?.posts?.length === 0 && r.json?.ids?.length === 0, `${usedPostStatus} ${r.status} ${r.text}`);
 await stopApp(app);
 
 fake.close();

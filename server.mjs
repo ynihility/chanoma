@@ -452,6 +452,9 @@ const HOUR_MS = 3_600_000;
 // 部屋の上限と、さわられていない部屋を消すまでの長さ
 const MAX_ROOMS = 100;
 const ROOM_TTL_MS = 3 * DAY_MS;
+// まだ一度も投稿も番組もない部屋は、この長さでかたづける（作っただけの部屋で、100室の枠を埋められないように）。
+// 一度でも投稿があった部屋は、朝の掃除で投稿が消えても、こちらではなく ROOM_TTL_MS で数える。テストでは差し替えられる（3日より長くはならない）
+const EMPTY_ROOM_TTL_MS = Number(process.env.CHANOMA_EMPTY_ROOM_TTL_MS) || 6 * HOUR_MS;
 // 部屋ごとに持つ番組の数（サーバーで作ったものも、端末から差し出されたものも含む）。1本は48KB以内なので、全体で約144MBが上限
 const MAX_PROGRAMS_PER_ROOM = 30;
 // 本棚に差し出せる日付は、きょうから何日前までか
@@ -583,12 +586,15 @@ const shortCode = (code) => `${code.slice(0, 4)}…`;
 // ほかの人の端末の鍵と同じかを、時間の差から当てられないように比べる（どちらも検査ずみの64字の16進数）
 const sameKey = (a, b) => crypto.timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
 
-// 3日さわられていない部屋を消す。消した数を返す
+// 3日さわられていない部屋と、まだ一度も投稿も番組もないまま EMPTY_ROOM_TTL_MS たった部屋を消す。消した数を返す。
+// lastAt は最初の投稿で 0 でなくなり、投稿を消しても朝の掃除でも 0 に戻らないので、「一度でも投稿があったか」の印に使う。
+// 空の部屋の長さを大きく設定しても、3日（ROOM_TTL_MS）より長くは残さない
 function evictStaleRooms() {
   const t = now();
   let count = 0;
   for (const [code, room] of rooms) {
-    if (t - room.touchedAt > ROOM_TTL_MS) {
+    const ttl = room.lastAt === 0 && room.programs.size === 0 ? Math.min(EMPTY_ROOM_TTL_MS, ROOM_TTL_MS) : ROOM_TTL_MS;
+    if (t - room.touchedAt > ttl) {
       rooms.delete(code);
       count++;
     }
@@ -596,7 +602,7 @@ function evictStaleRooms() {
   return count;
 }
 
-// 掃除。きょうより前の日付の投稿と、3日さわられていない部屋を消す。画面の返事は、きょうの投稿しか返さないので、
+// 掃除。きょうより前の日付の投稿と、使われていない部屋（evictStaleRooms）を消す。画面の返事は、きょうの投稿しか返さないので、
 // 掃除の間隔が空いても、古い投稿が見えることはない
 function sweep() {
   const staleRooms = evictStaleRooms();
@@ -615,14 +621,18 @@ function sweep() {
   if (oldPosts > 0 || staleRooms > 0) console.log(`[room] 掃除: 前の日の投稿 ${oldPosts} 件、使われていない部屋 ${staleRooms} 室を消しました`);
 }
 
-// コードから部屋を取り出す。形が違えば 400、なければ 404。見つかったら「さわられた」ことにする
+// コードから部屋を取り出す。形が違えば 400、なければ 404。
+// 読み（GET）だけでは「さわられた」ことにしない（読み続けるだけで部屋を居座らせられないように）。
+// さわられた時刻は、投稿・番組づくり・本棚の差し出しが成功したときだけ、touchRoom で新しくする
 function findRoom(code) {
   if (!isRoomCode(code)) throw new PublicError(400, 'この部屋のコードの形が正しくありません。');
   const room = rooms.get(code);
   if (!room) throw new PublicError(404, ROOM_NOT_FOUND);
-  room.touchedAt = now();
   return room;
 }
+const touchRoom = (room) => {
+  room.touchedAt = now();
+};
 
 // 画面に返す投稿。端末の鍵は入れない
 const publicPost = (entry) => ({ ...entry.post, at: entry.at });
@@ -718,6 +728,7 @@ async function addPost(req, code, res) {
   room.lastAt = at;
   const entry = { post: cleaned.post, key: device, at, day: today };
   room.posts.push(entry);
+  touchRoom(room);
   sendJson(res, 200, { post: publicPost(entry), count: room.posts.length });
 }
 
@@ -789,6 +800,7 @@ async function makeRoomNews(req, code, res) {
           source: 'server',
         };
         storeProgram(room, today, program);
+        touchRoom(room);
         console.log(`[room] きょうの番組を置きました（${shortCode(code)}、${data.posts.length}件）`);
         return program;
       } finally {
@@ -834,6 +846,7 @@ async function putShelf(req, code, date, res) {
     throw new PublicError(422, checked.error);
   }
   storeProgram(room, date, { ...checked.program, source: 'device' });
+  touchRoom(room);
   sendJson(res, 200, { ok: true });
 }
 
