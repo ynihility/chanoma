@@ -1,7 +1,9 @@
 // server.mjs の動作テスト。偽の API サーバーを立て、本物の API にもクレジットにも触れずに確かめる。実行: node --test
 import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, cpSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 // 特集名・編成のわけ・コーナーの一覧。サーバーが送るスキーマと、prompt.txt に書いた言葉を、この一覧と比べる
 import { CORNERS, FEATURES, REASONS } from '../safe.js';
@@ -551,6 +553,65 @@ const ambient = await startupBanner({ ANTHROPIC_BASE_URL: 'http://127.0.0.1:9' }
 check('ANTHROPIC_BASE_URL だけがあっても、送り先は本物の API と表示される', ambient.includes('送り先: 本物の Anthropic API') && !ambient.includes('127.0.0.1:9）'), ambient);
 const testBase = await startupBanner({ CHANOMA_API_BASE: 'http://127.0.0.1:9' });
 check('CHANOMA_API_BASE を指定すると、テスト用の接続先だと表示される', testBase.includes('テスト用の接続先') && testBase.includes('本物の API ではありません'), testBase);
+
+// --- 配るファイルは、起動時に1回だけ読んで使い回す ---
+// 同じ keep-alive の接続を使い回すための agent（1本だけ）。静的ファイルの短い待ち時間が、次の要求に残らないことを確かめる
+const keepAgent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+const getBytes = (port, p, method = 'GET', body) =>
+  new Promise((resolve) => {
+    const req = http.request({ host: '127.0.0.1', port, method, path: p, agent: keepAgent, headers: body ? { 'content-type': 'application/json' } : {} }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks), reused: req.reusedSocket }));
+    });
+    req.on('error', (e) => resolve({ status: 0, headers: {}, body: Buffer.alloc(0), error: e.code }));
+    req.end(body);
+  });
+// 前と同じバイト列・Content-Type・Cache-Control で返る。2回取っても同じ
+for (const [p, file, type] of [
+  ['/', 'index.html', 'text/html; charset=utf-8'], ['/app.js', 'app.js', 'text/javascript; charset=utf-8'], ['/sample.js', 'sample.js', 'text/javascript; charset=utf-8'],
+  ['/fonts/ReggaeOne-Regular.ttf', 'fonts/ReggaeOne-Regular.ttf', 'font/ttf'], ['/fonts/OFL-ReggaeOne.txt', 'fonts/OFL-ReggaeOne.txt', 'text/plain; charset=utf-8'],
+]) {
+  const first = await getBytes(APP_PORT, p);
+  const second = await getBytes(APP_PORT, p);
+  const cache = type.startsWith('font/') ? 'public, max-age=86400' : 'no-store';
+  check(`配る（読み込みは起動時の1回）: ${p} はファイルと同じバイト列・${type}・${cache}`,
+    first.status === 200 && first.body.equals(readFileSync(ROOT + file)) && first.headers['content-type'] === type && first.headers['cache-control'] === cache && first.headers['x-content-type-options'] === 'nosniff',
+    `${first.status} ${first.headers['content-type']} ${first.headers['cache-control']} ${first.body.length}`);
+  check(`配る（読み込みは起動時の1回）: ${p} を2回取っても同じ`, second.status === 200 && second.body.equals(first.body), `${second.status} ${second.body.length}`);
+}
+// 起動したあとにファイルを書き換えたり消したりしても、起動時に読んだ中身を配る。起動時になかったファイルは 404。
+// リポジトリのファイルは変えないように、写しの場所（一時フォルダ）でサーバーを動かして確かめる。.env など . で始まるものと test は写さない
+const copyDir = mkdtempSync(path.join(os.tmpdir(), 'chanoma-static-'));
+cpSync(ROOT, copyDir, { recursive: true, filter: (src) => !/^(\..*|test)$/.test(path.relative(ROOT, src).split(path.sep)[0]) });
+rmSync(path.join(copyDir, 'fonts', 'LICENSE-ChanomaDot.txt'));
+const copied = collectOutput(spawn('node', ['server.mjs'], {
+  cwd: copyDir,
+  env: { ...process.env, PORT: String(BANNER_PORT), ANTHROPIC_API_KEY: FAKE_KEY, CHANOMA_API_BASE: `http://127.0.0.1:${FAKE_PORT}`, CHANOMA_STATIC_SEND_TIMEOUT_MS: '200' },
+  stdio: ['ignore', 'pipe', 'pipe'],
+}));
+for (let i = 0; i < 100 && !copied.out.includes('待ち受けています') && copied.exitCode === null; i++) await wait(100);
+check('配る（写しの場所）: サーバーが起動する（起動時に読めないファイルがあっても止まらない）', copied.out.includes('待ち受けています'), copied.out.slice(-300));
+const missingAtStart = await getBytes(BANNER_PORT, '/fonts/LICENSE-ChanomaDot.txt');
+check('配る（写しの場所）: 起動時になかったファイルは 404', missingAtStart.status === 404, String(missingAtStart.status));
+const sampleBefore = await getBytes(BANNER_PORT, '/sample.js');
+writeFileSync(path.join(copyDir, 'sample.js'), '// 起動後に書き換えた中身\n');
+rmSync(path.join(copyDir, 'app.js'));
+const sampleAfter = await getBytes(BANNER_PORT, '/sample.js');
+const appAfter = await getBytes(BANNER_PORT, '/app.js');
+check('配る（写しの場所）: 起動後に書き換えても、起動時に読んだ中身を配る', sampleBefore.status === 200 && sampleAfter.status === 200 && sampleAfter.body.equals(readFileSync(ROOT + 'sample.js')),
+  `${sampleBefore.status} ${sampleAfter.status} ${sampleAfter.body.length}`);
+check('配る（写しの場所）: 起動後に消しても、起動時に読んだ中身を配る', appAfter.status === 200 && appAfter.body.equals(readFileSync(ROOT + 'app.js')), `${appAfter.status} ${appAfter.body.length}`);
+// 静的ファイルの待ち時間（ここでは 200ms）は、その応答の間だけ。同じ接続で次に来た番組づくり（返事まで約600ms）は切られない
+fakeMode = 'slow';
+const staticFirst = await getBytes(BANNER_PORT, '/');
+const slowNews = await getBytes(BANNER_PORT, '/api/news', 'POST', JSON.stringify({ posts }));
+fakeMode = 'good';
+check('配る（写しの場所）: 静的ファイルの短い待ち時間は、同じ接続の次の要求（返事の遅い番組づくり）に残らない',
+  staticFirst.status === 200 && slowNews.status === 200 && slowNews.reused === true, `${staticFirst.status} ${slowNews.status} ${slowNews.error ?? ''} 接続の使い回し=${slowNews.reused}`);
+keepAgent.destroy();
+await stopApp(copied);
+rmSync(copyDir, { recursive: true, force: true });
 
 // --- ログに APIキーが出ていない ---
 check('ログに APIキーの値が出ていない', !appLog.includes(FAKE_KEY));

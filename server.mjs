@@ -47,6 +47,21 @@ const STATIC_FILES = {
   '/fonts/OFL-DotGothic16.txt': ['fonts/OFL-DotGothic16.txt', 'text/plain; charset=utf-8'],
   '/fonts/LICENSE-ChanomaDot.txt': ['fonts/LICENSE-ChanomaDot.txt', 'text/plain; charset=utf-8'],
 };
+// 配るファイルは、起動時に1回だけ読み、同じ Buffer を使い回す。要求のたびに読むと、受け取らない接続の数だけ
+// フォント（約2MB）の写しがメモリに残るため。起動時に読めなかったファイルは、起動を止めずに 404 のままにする。
+// ファイルを直したときは、サーバーを起動し直すと反映される
+const STATIC_CACHE = new Map();
+for (const [urlPath, [file]] of Object.entries(STATIC_FILES)) {
+  try {
+    STATIC_CACHE.set(urlPath, await readFile(path.join(ROOT, file)));
+  } catch {
+    // 読めないファイルは入れない（handleStatic が 404 を返す）
+  }
+}
+// 画面のファイルの応答で、接続に動きがないまま（受け取りが止まったまま）この長さがたったら、接続を切る。
+// 送りの途中で少しずつ受け取っている端末の扱いは、置き場所の OS では確かめていないので、遅い回線でも約2MBが届く長さにしている。
+// テストでは短い値に差し替えられる
+const STATIC_SEND_TIMEOUT_MS = Number(process.env.CHANOMA_STATIC_SEND_TIMEOUT_MS) || 60_000;
 
 // 30件 × 200文字のひとことが、日本語（1文字3バイト）で約22KBになる。それより余裕をもたせた上限
 const MAX_BODY_BYTES = 32 * 1024;
@@ -870,16 +885,13 @@ async function handleRoom(req, res, pathname, url) {
 
 async function handleStatic(pathname, res) {
   const entry = STATIC_FILES[pathname];
-  if (!entry) throw new PublicError(404, '見つかりません。');
-  let file;
-  try {
-    file = await readFile(path.join(ROOT, entry[0]));
-  } catch {
-    throw new PublicError(404, '見つかりません。');
-  }
+  const file = entry ? STATIC_CACHE.get(pathname) : undefined;
+  if (!file) throw new PublicError(404, '見つかりません。');
+  // 送りが進まない接続は切る。この応答の間だけの設定（次の要求が来ると、Node が接続の待ち時間を戻す）
+  res.setTimeout(STATIC_SEND_TIMEOUT_MS, () => res.destroy());
   res.writeHead(200, {
     'Content-Type': entry[1],
-    // フォントは大きい（約2MB）うえに変わらないので、1日は端末に保存させる。ほかは、直したらすぐ反映されるよう保存させない
+    // フォントは大きい（約2MB）うえに変わらないので、1日は端末に保存させる。ほかは、起動し直して直したものがすぐ届くよう保存させない
     'Cache-Control': entry[1].startsWith('font/') ? 'public, max-age=86400' : 'no-store',
     'X-Content-Type-Options': 'nosniff',
     ...SECURITY_HEADERS,
