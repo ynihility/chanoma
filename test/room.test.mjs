@@ -99,9 +99,20 @@ function startApp(env) {
   child.stderr.on('data', (d) => (app.log += d));
   return app;
 }
+// いま起動した子（app）が「待ち受けています」と出してから問い合わせる。同じ番号でほかのサーバーが答えても、起動できたことにしないため。
+// 子が先に止まったら（番号の取り合いの EADDRINUSE など）、10秒待たずに、終了コードと出力の末尾を付けて止める
 async function waitReady(timeoutMs = 10_000) {
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
+    const { child } = app;
+    if (child.exitCode !== null || child.signalCode !== null) {
+      await wait(200); // 出力の残りが届くのを待ってから、理由を付ける
+      throw new Error(`サーバーが起動の前に止まりました（終了コード ${child.exitCode ?? child.signalCode}）: ${app.log.slice(-400)}`);
+    }
+    if (!app.log.includes('待ち受けています')) {
+      await wait(50);
+      continue;
+    }
     try {
       const res = await fetch(`http://127.0.0.1:${APP_PORT}/`);
       await res.arrayBuffer();
@@ -110,7 +121,7 @@ async function waitReady(timeoutMs = 10_000) {
       await wait(100);
     }
   }
-  throw new Error(`サーバーが ${timeoutMs}ms 以内に起動しませんでした`);
+  throw new Error(`サーバーが ${timeoutMs}ms 以内に起動しませんでした: ${app.log.slice(-400)}`);
 }
 async function stopApp(app) {
   const child = app.child;

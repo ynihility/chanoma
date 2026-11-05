@@ -132,17 +132,34 @@ const fake = http.createServer((req, res) => {
 });
 
 function startApp(env) {
-  return spawn('node', ['server.mjs'], {
+  return collectOutput(spawn('node', ['server.mjs'], {
     cwd: ROOT,
     env: { ...process.env, PORT: String(APP_PORT), CHANOMA_API_BASE: `http://127.0.0.1:${FAKE_PORT}`, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  }));
+}
+// 子のサーバーの出力を child.out にためる。起動を待つときに「待ち受けを始めたか」と、先に止まったときの理由を見るため
+function collectOutput(child) {
+  child.out = '';
+  child.stdout.on('data', (d) => (child.out += d));
+  child.stderr.on('data', (d) => (child.out += d));
+  return child;
 }
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 // サーバーが返事をするようになるまで待つ（最大10秒）。決まった時間だけ待つと、パソコンが混んでいるときに間に合わないため
+// いま起動した子（app）が「待ち受けています」と出してから問い合わせる。同じ番号でほかのサーバーが答えても、起動できたことにしないため。
+// 子が先に止まったら（番号の取り合いの EADDRINUSE など）、10秒待たずに、終了コードと出力の末尾を付けて止める
 async function waitReady(timeoutMs = 10_000) {
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
+    if (app.exitCode !== null || app.signalCode !== null) {
+      await wait(200); // 出力の残りが届くのを待ってから、理由を付ける
+      throw new Error(`サーバーが起動の前に止まりました（終了コード ${app.exitCode ?? app.signalCode}）: ${app.out.slice(-400)}`);
+    }
+    if (!app.out.includes('待ち受けています')) {
+      await wait(50);
+      continue;
+    }
     try {
       const res = await fetch(`http://127.0.0.1:${APP_PORT}/`);
       await res.arrayBuffer();
@@ -151,7 +168,7 @@ async function waitReady(timeoutMs = 10_000) {
       await wait(100);
     }
   }
-  throw new Error(`サーバーが ${timeoutMs}ms 以内に起動しませんでした`);
+  throw new Error(`サーバーが ${timeoutMs}ms 以内に起動しませんでした: ${app.out.slice(-400)}`);
 }
 // サーバーを止め、本当に終わってから次へ進む。止まりきる前に次を起動すると、古いサーバーに話しかけてしまうため
 async function stopApp(child) {
@@ -578,11 +595,11 @@ await stopApp(app);
 // 1分あたりの上限を3にして起動する。キーが無いまま送り続けても、回数の枠を使わないので、429 に変わらず 500 のまま
 const noKeyEnv = { ...process.env };
 delete noKeyEnv.ANTHROPIC_API_KEY;
-app = spawn('node', ['server.mjs'], {
+app = collectOutput(spawn('node', ['server.mjs'], {
   cwd: ROOT,
   env: { ...noKeyEnv, PORT: String(APP_PORT), CHANOMA_API_BASE: `http://127.0.0.1:${FAKE_PORT}`, CHANOMA_RATE_PER_MINUTE: '3' },
-  stdio: 'ignore',
-});
+  stdio: ['ignore', 'pipe', 'pipe'],
+}));
 await waitReady();
 r = await call('POST', '/api/news', { posts });
 check('キー未設定 -> 500 で内部情報を出さない', r.status === 500 && !/ANTHROPIC|環境変数/.test(r.text), r.text);
