@@ -116,8 +116,9 @@ function isSilent(ch) {
 export function pitchForChar(ch) {
   if (typeof ch !== 'string' || ch === '' || isSilent(ch)) return null;
   const code = toHiragana(ch).codePointAt(0);
-  // 隣り合う文字が同じ高さに偏らないよう、素数をかけてから音階に割り当てる
-  const step = SCALE[(code * 7) % SCALE.length];
+  // 隣り合う文字が同じ高さに偏らないよう、素数をかけてから音階に割り当てる。
+  // かける数は音階の段数（7）と公約数を持たない 5 にする（7 をかけると余りが常に 0 になり、全部同じ高さになる）
+  const step = SCALE[(code * 5) % SCALE.length];
   return BASE_FREQ * 2 ** (step / 12);
 }
 

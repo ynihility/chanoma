@@ -13,6 +13,11 @@ test('同じ文字は同じ高さで、300〜700Hz の範囲に入る', () => {
   }
 });
 
+test('違う文字は高さがばらけ、音階の7段をすべて使う', () => {
+  const pitches = new Set([...'あいうえおかきくけこさしすせそ'].map(pitchForChar));
+  assert.equal(pitches.size, 7, `高さの種類 ${pitches.size}`);
+});
+
 test('カタカナはひらがなと同じ高さ', () => {
   assert.equal(pitchForChar('ア'), pitchForChar('あ'));
   assert.equal(pitchForChar('ン'), pitchForChar('ん'));
