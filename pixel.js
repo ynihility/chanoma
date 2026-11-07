@@ -67,3 +67,26 @@ export function spriteCanvas(name, scale = 1, label, options = {}) {
   }
   return canvas;
 }
+
+// スプライトを、すでにある canvas の (x, y) に、等倍で描く（canvas の大きさは変えない）。
+// 茶の間のように、1枚の canvas に、たくさんの絵を重ねるときに使う。options.flip が true なら左右を反転する
+export function drawSpriteAt(ctx, name, x, y, options = {}) {
+  const sprite = SPRITES[name];
+  if (!sprite) return false;
+  sprite.rows.forEach((row, rowIndex) => {
+    let col = 0;
+    while (col < row.length) {
+      const key = row[col];
+      let end = col + 1;
+      while (end < row.length && row[end] === key) end++;
+      if (key !== '.' && PALETTE[key]) {
+        ctx.fillStyle = PALETTE[key];
+        // 反転のときは、同じ色の並び（col〜end）を、幅の反対側に移す
+        const left = options.flip ? sprite.w - end : col;
+        ctx.fillRect(x + left, y + rowIndex, end - col, 1);
+      }
+      col = end;
+    }
+  });
+  return true;
+}

@@ -40,6 +40,7 @@ const STATIC_FILES = {
   '/sample.js': ['sample.js', 'text/javascript; charset=utf-8'],
   '/room.js': ['room.js', 'text/javascript; charset=utf-8'],
   '/level.js': ['level.js', 'text/javascript; charset=utf-8'],
+  '/chanoma-room.js': ['chanoma-room.js', 'text/javascript; charset=utf-8'],
   // 同梱フォントと、そのライセンス全文（OFL では、フォントと一緒にライセンスを配る決まり）
   '/fonts/ReggaeOne-Regular.ttf': ['fonts/ReggaeOne-Regular.ttf', 'font/ttf'],
   '/fonts/DotGothic16-Regular.ttf': ['fonts/DotGothic16-Regular.ttf', 'font/ttf'],

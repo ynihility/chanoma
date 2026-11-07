@@ -358,6 +358,29 @@
       word-break: auto-phrase;
     }
 
+    /* 家族の茶の間: 紙の額に、320×180 のドット絵の canvas を、整数倍で入れる（倍率は app.js が幅から決める） */
+    .chanoma-room {
+      padding: var(--gap-3);
+      background: var(--paper);
+      border: 10px solid var(--wood);
+      border-radius: var(--radius-panel);
+      box-shadow: inset 0 0 0 3px var(--wood-light), 0 8px 0 var(--shade), 0 8px 0 3px var(--ink);
+    }
+    #chanoma-canvas {
+      display: block;
+      margin: 0 auto;
+      max-width: 100%;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      border: 3px solid var(--ink);
+    }
+    .chanoma-count { margin: var(--gap-2) 0 0; text-align: center; font-weight: 700; }
+    /* 夜 7 時は、部屋の暗い幕（body::before）の上に出す。暗さは絵の中で付けている */
+    body.night #chanoma-room { position: relative; z-index: 3; }
+    @media (max-width: 640px) {
+      .chanoma-room { padding: var(--gap-1); border-width: 6px; }
+    }
+
     /* 自分のキャラのレベルの札と、レベルが上がったときの一言 */
     .level-badge {
       display: inline-flex;
@@ -1238,6 +1261,13 @@
   </div>
 
   <main>
+    <!-- 家族の茶の間。部屋にいる動物が、ゆっくり動く飾り（だれが投稿したかでは、動きも出る動物も変わらない） -->
+    <section id="chanoma-room" class="chanoma-room" aria-labelledby="chanoma-title">
+      <h2 id="chanoma-title" class="sr">家族の茶の間</h2>
+      <canvas id="chanoma-canvas" width="320" height="180" role="img" aria-label="家族の茶の間。動物たちが、ゆっくり動いています。"></canvas>
+      <p id="chanoma-count" class="chanoma-count"></p>
+    </section>
+
     <section id="post-view" class="panel" aria-labelledby="post-title">
       <h2 id="post-title" tabindex="-1"></h2>
       <ol class="steps" id="steps" role="list" aria-label="投稿の手順">

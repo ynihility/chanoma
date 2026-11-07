@@ -14,6 +14,17 @@ import { LEVEL_KEY, xpOf, loadLevel, addXp, serializeLevel } from './level.js';
 let fx = null;
 import('./effects.js').then((m) => { fx = m; }).catch((e) => console.warn('effects.js を読み込めませんでした', e));
 
+// 家族の茶の間（canvas）も飾り。読み込めなかったときも、投稿と放送は動かす
+let chanoma = null;
+let chanomaMod = null;
+import('./chanoma-room.js').then((m) => {
+  chanomaMod = m;
+  chanoma = m.createChaNoMa($('chanoma-canvas'));
+  layoutChaNoMa();
+  chanoma.setWatching(!$('tv-view').hidden);
+  syncChaNoMa();
+}).catch((e) => console.warn('chanoma-room.js を読み込めませんでした', e));
+
 // お題ごとの札。「つぎに会う日」の希望も同じ形で持つ
 const CARDS = {
   'ごはん': ['ごはん', 'パン', 'めん', 'おかず', 'おやつ', 'のみもの'],
@@ -282,7 +293,35 @@ function renderForm() {
   // 人を切り替えたときや、送ったあとに入力欄が空になったときも、文字数を合わせる
   showCounts();
   renderSteps();
+  syncChaNoMa();
 }
+
+// ---- 家族の茶の間 ----
+// 茶の間に出す動物。この端末で選んだ動物と、部屋に出てきた動物（部屋に入っていなければ、この端末の投稿の動物）。
+// 動物の名前だけを集める。だれが投稿したか・していないかは、ここでは見ない
+function syncChaNoMa() {
+  if (!chanoma) return;
+  const mine = Object.values(profiles).map((p) => p.animal);
+  const others = roomOn() ? rc.animals() : state.posts.map((p) => p.animal);
+  const names = chanomaMod.rosterOf(mine, others);
+  chanoma.setAnimals(names);
+  $('chanoma-count').textContent = chanomaMod.countText(names.length);
+}
+
+// canvas は、幅に収まる整数倍で出す（320 に満たない狭い画面だけ、幅に合わせる）
+function layoutChaNoMa() {
+  if (!chanomaMod) return;
+  const box = $('chanoma-room');
+  const style = getComputedStyle(box);
+  const avail = box.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  if (!(avail > 0)) return;
+  // 枠線（左右 3px ずつ）の分を引く
+  const k = chanomaMod.fitScale(avail - 6);
+  const canvas = $('chanoma-canvas');
+  canvas.style.width = k ? `${320 * k + 6}px` : `${Math.floor(avail)}px`;
+  canvas.style.height = k ? `${180 * k + 6}px` : 'auto';
+}
+window.addEventListener('resize', layoutChaNoMa);
 
 // 投稿の手順の丸（だれ → お題 → 札 → おくる）。選んだところにチェックが付き、次にやることの丸が目立つ
 // 送った直後だけ、その人の4つを全部「できた」にして見せる（次の選択を始めるか、少し経つと戻る）
@@ -490,6 +529,7 @@ function renderPosts() {
   // 投稿が変わったので、できていた番組が使えるかどうかを、ボタンに反映する
   syncEvening();
   renderRoomCount();
+  syncChaNoMa();
 }
 
 // 動きを減らす設定か（そのときは、飾りの動きを出さない）
@@ -870,6 +910,8 @@ function setView(onAir, shelf = false) {
   }
   // 夜7時: 部屋を暗くして、テレビだけを光らせる
   document.body.classList.toggle('night', onAir);
+  // 茶の間の動物は、番組を見ているあいだ、テレビの前に集まる
+  chanoma?.setWatching(onAir);
   // 押したボタンは隠れるので、フォーカスを新しい画面に移す（キーボードや読み上げの人が迷子にならないように）。
   // テレビのほうは、フォーカスで勝手に動かさず、tvToTop で先頭へ寄せる
   if (onAir) {
@@ -1612,6 +1654,7 @@ function applySync(r) {
     roomStatus = 'offline';
   }
   if (r.badProgram) roomSay('届いた番組が決まりに合わなかったので、使いませんでした。');
+  syncChaNoMa();
   renderRoom();
   renderRoomCount();
   renderLate();
