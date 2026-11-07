@@ -11,6 +11,10 @@ export const WISH_DATE_TOPIC = 'いつ会いたい';
 export const NEXT_TOPICS = [WISH_DATE_TOPIC, 'なにしたい', 'どこ行きたい', 'なに食べたい'];
 export const HEADLINES = ['うれしかった', 'おいしかった', 'びっくり', 'なつかしい'];
 export const ANIMALS = ['ねこ', 'いぬ', 'うさぎ', 'くま', 'すずめ', 'かめ'];
+// スタンプ。投稿の stamp の値は、この中のどれかだけ（絵は sprites.js の「スタンプ:名前」）
+export const STAMPS = ['ゆのみ', 'みかん', 'おにぎり', 'はな', 'ほし', 'ふとん'];
+// スタンプだけの投稿か。本文もお題もなく、スタンプの名前だけを持つ
+export const isStamp = (post) => post?.kind === 'stamp';
 // 放送の順番。この並びより前に戻るコーナーがあれば、番組として受け取らない
 export const CORNERS = ['ひとこと', 'むかし', 'つぎ'];
 
@@ -84,6 +88,26 @@ function buildPost(p, ids) {
   ids.add(p.id);
   const who = optionalText(p.who, 20, 'よびかた');
   if (!who) fail('よびかたを入れてください。');
+  // 投稿の種類は、スタンプか、指定なし（ふつうの投稿）の2つだけ
+  const kind = optionalChoice(p.kind, ['stamp'], '投稿の種類');
+  if (kind === undefined && p.stamp !== undefined && p.stamp !== null && p.stamp !== '') fail('スタンプは、スタンプの投稿にだけ入れられます。');
+  if (kind === 'stamp') {
+    // スタンプの投稿は、スタンプの名前だけを持つ。お題・札・見出し・ひとこと・会いたい日が混ざっていたら、断る
+    const stamp = optionalChoice(p.stamp, STAMPS, 'スタンプ');
+    if (!stamp) fail('スタンプをえらんでください。');
+    for (const key of ['topic', 'card', 'wishDate', 'headline', 'text']) {
+      if (p[key] !== undefined && p[key] !== null && p[key] !== '') fail('スタンプの投稿には、お題やひとことを入れられません。');
+    }
+    const stampPost = {
+      id: p.id,
+      who,
+      name: optionalText(p.name, 20, 'ニックネーム'),
+      animal: optionalChoice(p.animal, ANIMALS, 'どうぶつ'),
+      kind,
+      stamp,
+    };
+    return Object.fromEntries(Object.entries(stampPost).filter(([, v]) => v !== undefined));
+  }
   const topic = optionalChoice(p.topic, [...TODAY_TOPICS, ...NEXT_TOPICS], 'お題');
   if (!topic) fail('お題を選んでください。');
   // 会いたい日の希望は、「いつ会いたい」のときだけ、日付で答える
@@ -251,6 +275,8 @@ const HONORIFIC = /(さん(?!ぽ|ま|かく|か|せい|すう|にん|じゅう|�
 const ALLOWED_KATAKANA = [
   'ニュース', 'コーナー', 'テレビ', 'テレ', 'スタート', 'スタジオ', 'ゲスト', 'メッセージ',
   'オープニング', 'エンディング', 'ラジオ', 'コメント', 'チャンネル', 'ナレーション', 'プログラム',
+  // スタンプの投稿を「〇〇さんから、みかんのスタンプです」と紹介するときの言葉
+  'スタンプ',
 ].sort((a, b) => b.length - a.length);
 
 // 設計のルールで禁じていること。ひらがなに直した文字列に対して、部分一致で探す
@@ -522,9 +548,13 @@ export function checkNews(news, posts) {
     if (NEXT_TOPICS.includes(post.topic) !== (corner === 'つぎ')) return bad('投稿とコーナーが合わない');
     // 家族が「なつかしい」を選んだ今日の投稿は、必ず むかし に入る。置き場所の誤りは、つなぎの言葉の検査より先に知らせる
     if (isNostalgic(post) && corner !== 'むかし') return bad('なつかしいを選んだ今日の投稿が むかし にない');
+    // スタンプの投稿は きょうの一言（ひとこと）で、スタンプの名前を言って紹介する。本文がないので、言うのは名前までにする
+    if (isStamp(post) && corner !== 'ひとこと') return bad('スタンプの投稿が ひとこと にない');
     if (typeof host !== 'string' || host.trim() === '' || host.length > MAX_HOST_CHARS) return bad('host の長さや型が違う');
     const w = wordProblem(host, ctx);
     if (w) return bad(`host(${from}): ${w}`);
+    // スタンプの紹介には、そのスタンプの名前が入っていること（別のものを言ったり、名前を言わなかったりしていないか）
+    if (isStamp(post) && !fold(host).includes(fold(post.stamp))) return bad(`host(${from}): スタンプの名前が、つなぎの言葉にない`);
     segments.push({ corner, from, host: host.trim() });
   }
   if (used.size !== posts.length) return bad('使われていない投稿がある');

@@ -204,7 +204,7 @@
     button:disabled { cursor: wait; border-style: dashed; transform: none; }
 
     /* 動物を選ぶ座布団: 絵の下に名前 */
-    button.animal {
+    button.animal, button.stamp {
       display: inline-flex;
       flex-direction: column;
       align-items: center;
@@ -856,6 +856,9 @@
     .screen .post .who-text { min-width: 0; overflow-wrap: anywhere; }
     .screen .post .card { font-size: 38px; font-weight: 800; line-height: 1.4; margin: 0; overflow-wrap: anywhere; }
     .screen .post .text { font-size: 32px; line-height: 1.6; margin: var(--gap-2) 0 0; overflow-wrap: anywhere; }
+    /* スタンプの投稿: 本文のかわりに、ドット絵（4倍）と小さな「（スタンプ）」 */
+    .screen .post .stamp-show { display: flex; align-items: center; gap: var(--gap-3); margin: 0; }
+    .screen .post .stamp-note { font-size: 24px; font-weight: 700; color: var(--shade); }
     .screen .fade { position: relative; z-index: 1; animation: fade-in 350ms ease-out; }
     /* 演出（モザイク・砂嵐）の中で入れ替えるときは、演出が出入りを受け持つので、ふわっと出る動きは付けない */
     .screen .fade.still { animation: none; }
@@ -1239,6 +1242,8 @@
         <p class="note">声は保存しません。音声認識はブラウザの機能で、提供元のサーバーに送られる場合があります。整えるために話の文章はClaudeに送ります。</p>
         <p class="note">声は文字になって、入力欄に入ります。まちがいがないか見てから、「おくる」を押してください。</p>
       </div>
+      <p class="label" id="stamps-label">スタンプ（おすと、すぐ送れます）</p>
+      <div class="row" id="stamps" role="group" aria-labelledby="stamps-label"></div>
       <div class="row send-row" id="send-row" style="margin-top: 24px">
         <button id="send" class="primary">おくる</button>
       </div>

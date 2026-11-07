@@ -1,7 +1,7 @@
 // 画面の動き。投稿をためて、夜7時に /api/news で番組を作ってもらい、テレビに順に映す。
 // 画面に出す文字はすべて textContent で入れる。innerHTML は使わない。
 import {
-  STORAGE_KEY, MAX_POSTS, TODAY_TOPICS, NEXT_TOPICS, WISH_DATE_TOPIC, HEADLINES, ANIMALS,
+  STORAGE_KEY, MAX_POSTS, TODAY_TOPICS, NEXT_TOPICS, WISH_DATE_TOPIC, HEADLINES, ANIMALS, STAMPS,
   DEFAULT_ROLES, cleanPosts, cleanPost, cleanDate, cleanRoles, checkNews, checkPostWords, reasonFact, loadState, serializeState,
 } from './safe.js';
 import { createRoomClient, parseInvite, hasInvite, SYNC_MS } from './room.js';
@@ -416,9 +416,21 @@ function restorePost() {
 function postBody(p) {
   const body = el('span', undefined, 'body');
   const wish = p.wishDate ? monthDay(p.wishDate) : '';
-  nwJoin(body, [p.animal ? `【${p.animal}】` : '', p.who, p.topic, p.card, wish, p.headline].filter(Boolean));
+  // スタンプの投稿は、お題も本文もない。「スタンプ」と、その名前を出す
+  const parts = p.kind === 'stamp'
+    ? [p.animal ? `【${p.animal}】` : '', p.who, 'スタンプ', p.stamp]
+    : [p.animal ? `【${p.animal}】` : '', p.who, p.topic, p.card, wish, p.headline];
+  nwJoin(body, parts.filter(Boolean));
   if (p.text) body.append('　', p.text);
   return body;
+}
+
+// 投稿の左に置く絵（動物と、スタンプ）。飾りなので読み上げない
+function postIcons(p) {
+  const icons = [];
+  if (p.animal) icons.push(spriteCanvas(p.animal, 3, undefined, { shadow: true }));
+  if (p.kind === 'stamp') icons.push(spriteCanvas(`スタンプ:${p.stamp}`, 3, undefined, { shadow: true }));
+  return icons;
 }
 
 function renderPosts() {
@@ -441,7 +453,8 @@ function renderPosts() {
     const del = el('button', '消す');
     del.type = 'button';
     // 「消す」が何件も並ぶので、読み上げでどの投稿か分かるように名前を付ける
-    del.setAttribute('aria-label', `${p.who}の「${p.card ?? (p.wishDate ? monthDay(p.wishDate) : p.topic)}」の投稿を消す`);
+    const what = p.kind === 'stamp' ? `${p.stamp}のスタンプ` : (p.card ?? (p.wishDate ? monthDay(p.wishDate) : p.topic));
+    del.setAttribute('aria-label', `${p.who}の「${what}」の投稿を消す`);
     del.addEventListener('click', () => {
       // 部屋の投稿は、部屋からも消す（消したあとは元に戻せない）
       if (roomOn()) {
@@ -458,9 +471,8 @@ function renderPosts() {
       // 消したボタンは無くなるので、フォーカスを「もとにもどす」へ移す（画面は動かさない）
       $('posts').querySelector('.undo button')?.focus({ preventScroll: true });
     });
-    // 動物を選んでいれば、左にドット絵を置く（飾りなので読み上げない）
-    if (p.animal) li.append(spriteCanvas(p.animal, 3, undefined, { shadow: true }));
-    li.append(body, del);
+    // 動物を選んでいれば、左にドット絵を置く（スタンプの投稿は、そのスタンプも）
+    li.append(...postIcons(p), body, del);
     list.append(li);
   });
   // いちばん後ろの投稿を消したときは、一覧の終わりに出す
@@ -543,6 +555,38 @@ function popEl(target, kind = 'pop') {
 // 投稿のIDは、safe.js の決まり（英数字と - _ で20文字まで）に合わせる
 const newId = () => `p${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-5)}`;
 
+// 投稿の上限に届いていれば、button をゆらして知らせて true を返す。
+// 部屋では、一覧に見えている自分の投稿だけを数える（ほかの部屋や、入る前の投稿は見えず、消せないため）
+function postLimitReached(button) {
+  const shown = roomOn() ? state.posts.filter((p) => rc.isMine(p.id)).length : state.posts.length;
+  if (shown < MAX_POSTS) return false;
+  popEl(button, 'shake');
+  play('error');
+  say(`投稿は${MAX_POSTS}件までです。いらない投稿を消してください。`);
+  return true;
+}
+
+// 送っている最中は、「おくる」もスタンプも押せなくする（二重に送らないため）
+function setSendLocked(locked) {
+  $('send').disabled = locked;
+  for (const b of $('stamps').querySelectorAll('button')) b.disabled = locked;
+}
+
+// スタンプの札を作る。ボタンは最初に1回だけ作る（作り直すと、キーボードのフォーカスが消えるため）
+function renderStamps() {
+  const box = $('stamps');
+  if (box.children.length > 0) return;
+  for (const name of STAMPS) {
+    const b = el('button');
+    b.type = 'button';
+    b.className = 'stamp';
+    b.setAttribute('aria-label', `${name}のスタンプをおくる`);
+    b.append(spriteCanvas(`スタンプ:${name}`, 3, undefined, { shadow: true }), el('span', name, 'stamp-name'));
+    b.addEventListener('click', () => submitStamp(name, b));
+    box.append(b);
+  }
+}
+
 function submitPost() {
   cancelVoice();
   popEl($('send'), 'pop');
@@ -570,14 +614,7 @@ function submitPost() {
     say('今日より前の日にちは、えらべません。');
     return;
   }
-  // 部屋では、一覧に見えている自分の投稿だけを数える（ほかの部屋や、入る前の投稿は見えず、消せないため）
-  const shown = roomOn() ? state.posts.filter((p) => rc.isMine(p.id)).length : state.posts.length;
-  if (shown >= MAX_POSTS) {
-    popEl($('send'), 'shake');
-    play('error');
-    say(`投稿は${MAX_POSTS}件までです。いらない投稿を消してください。`);
-    return;
-  }
+  if (postLimitReached($('send'))) return;
   const post = {
     id: newId(), who: role, name: profile().nick, animal: profile().animal,
     topic: pick.topic, card: askDate ? '' : pick.card, wishDate, headline: pick.headline, text: $('text').value,
@@ -586,9 +623,14 @@ function submitPost() {
     submitRoomPost(post);
     return;
   }
+  sendLocal(post);
+}
+
+// 1台のとき: 検査して、保存して、送れたことを画面に出す。opts は finishSend と同じ
+function sendLocal(post, opts = {}) {
   const r = cleanPosts({ posts: [...state.posts, post], nextDate: state.nextDate });
   if (!r.ok) {
-    popEl($('send'), 'shake');
+    popEl(opts.button ?? $('send'), 'shake');
     play('error');
     say(r.error);
     return;
@@ -596,24 +638,41 @@ function submitPost() {
   dropUndo();
   state = { posts: r.posts, ...keep() };
   const saved = save();
-  finishSend(post, saved ? 'おくりました。つぎの人に切り替えて、送れます。' : 'おくりました。ただし、この端末には保存できませんでした。画面を閉じると消えます。');
+  finishSend(post, saved ? 'おくりました。つぎの人に切り替えて、送れます。' : 'おくりました。ただし、この端末には保存できませんでした。画面を閉じると消えます。', opts);
 }
 
-// 送れたあとの画面の更新（1台のときも、部屋のときも同じ）
-function finishSend(post, message) {
-  popEl($('send'), 'sparkle');
+// スタンプを送る。お題・見出し・ひとことは要らず、スタンプの名前だけを投稿にする。
+// 書きかけのひとことや、えらんだ札は、スタンプのために消さない
+function submitStamp(name, button) {
+  popEl(button, 'pop');
+  if (postLimitReached(button)) return;
+  const post = { id: newId(), who: role, name: profile().nick, animal: profile().animal, kind: 'stamp', stamp: name };
+  const opts = { keepForm: true, button };
+  if (roomOn()) {
+    submitRoomPost(post, opts);
+    return;
+  }
+  sendLocal(post, opts);
+}
+
+// 送れたあとの画面の更新（1台のときも、部屋のときも同じ）。
+// opts.keepForm が true（スタンプ）のときは、入力欄や手順の丸には触らない。opts.button は、はずませる押したボタン
+function finishSend(post, message, opts = {}) {
+  popEl(opts.button ?? $('send'), 'sparkle');
   play('send');
   hopAnimal(post.animal);
-  // 手順の丸を、少しのあいだ全部「できた」にする
-  sentBy = role;
-  clearTimeout(sentTimer);
-  sentTimer = setTimeout(() => {
-    sentBy = '';
-    renderSteps();
-  }, 1800);
-  pick.topic = pick.card = pick.headline = '';
-  $('text').value = '';
-  $('wish-date').value = '';
+  if (!opts.keepForm) {
+    // 手順の丸を、少しのあいだ全部「できた」にする
+    sentBy = role;
+    clearTimeout(sentTimer);
+    sentTimer = setTimeout(() => {
+      sentBy = '';
+      renderSteps();
+    }, 1800);
+    pick.topic = pick.card = pick.headline = '';
+    $('text').value = '';
+    $('wish-date').value = '';
+  }
   sayTop(message);
   renderForm();
   renderPosts();
@@ -924,14 +983,21 @@ function renderStep(still = false) {
     nwJoin(whoText, [p.animal ? `【${p.animal}】` : '', p.who, p.name ? `（${p.name}）` : ''].filter(Boolean), '');
     who.append(whoText);
     box.append(who);
-    // つぎに会う日の希望は「なにしたい　おでかけ」のように、お題と札を並べて出す
-    // 「いつ会いたい」は、札のかわりに日付と、あと何日かを出す
-    const wish = p.wishDate ? `${monthDay(p.wishDate)}${daysSuffix(p.wishDate)}` : p.card;
-    const cardLine = NEXT_TOPICS.includes(p.topic) ? [p.topic, wish] : [p.card];
-    const card = el('p', undefined, 'card');
-    nwJoin(card, [...cardLine, p.headline].filter(Boolean));
-    box.append(card);
-    if (p.text) box.append(el('p', p.text, 'text'));
+    if (p.kind === 'stamp') {
+      // スタンプの投稿は、本文のかわりに、スタンプのドット絵（4倍）と「（スタンプ）」の小さな文字
+      const showStamp = el('p', undefined, 'stamp-show');
+      showStamp.append(spriteCanvas(`スタンプ:${p.stamp}`, 4, `${p.stamp}のスタンプ`, { shadow: true }), el('span', '（スタンプ）', 'stamp-note'));
+      box.append(showStamp);
+    } else {
+      // つぎに会う日の希望は「なにしたい　おでかけ」のように、お題と札を並べて出す
+      // 「いつ会いたい」は、札のかわりに日付と、あと何日かを出す
+      const wish = p.wishDate ? `${monthDay(p.wishDate)}${daysSuffix(p.wishDate)}` : p.card;
+      const cardLine = NEXT_TOPICS.includes(p.topic) ? [p.topic, wish] : [p.card];
+      const card = el('p', undefined, 'card');
+      nwJoin(card, [...cardLine, p.headline].filter(Boolean));
+      box.append(card);
+      if (p.text) box.append(el('p', p.text, 'text'));
+    }
     wrap.append(box);
   } else if (step.kind === 'table') {
     // 番組表はテレ吉のせりふではないので、司会の吹き出しは付けない
@@ -1292,8 +1358,7 @@ function renderLate() {
   $('late').hidden = posts.length === 0;
   $('late-posts').replaceChildren(...posts.map((p) => {
     const li = el('li');
-    if (p.animal) li.append(spriteCanvas(p.animal, 3, undefined, { shadow: true }));
-    li.append(postBody(p));
+    li.append(...postIcons(p), postBody(p));
     return li;
   }));
 }
@@ -1302,11 +1367,12 @@ function renderLate() {
 const bannedMessage = (reason) => `この言葉は使えません。${typeof reason === 'string' && reason.length <= 60 ? `理由：${reason}。` : ''}ひとことは消していません。書き直してから、もう一度おくってください。`;
 
 // 投稿を部屋に送る。圏外などで送れなかったときは、端末に持って、つながったら送る
-async function submitRoomPost(post) {
+async function submitRoomPost(post, opts = {}) {
   if (sending) return;
+  const button = opts.button ?? $('send');
   const clean = cleanPost(post);
   if (!clean.ok) {
-    popEl($('send'), 'shake');
+    popEl(button, 'shake');
     play('error');
     say(clean.error);
     return;
@@ -1314,24 +1380,24 @@ async function submitRoomPost(post) {
   // サーバーでも同じ検査をするが、送る前に止めたほうが早く伝えられる
   const words = checkPostWords(clean.post);
   if (!words.ok) {
-    popEl($('send'), 'shake');
+    popEl(button, 'shake');
     play('error');
     say(bannedMessage(words.reason));
     return;
   }
   if (roomCount >= MAX_POSTS) {
-    popEl($('send'), 'shake');
+    popEl(button, 'shake');
     play('error');
     say(`きょうは${MAX_POSTS}件までです。`);
     return;
   }
   sending = true;
-  $('send').disabled = true;
+  setSendLocked(true);
   try {
     const res = await rc.post(clean.post);
     if (!roomOn()) return;
     if (!res.ok) {
-      popEl($('send'), 'shake');
+      popEl(button, 'shake');
       play('error');
       say(res.reason ? bannedMessage(res.reason) : res.error);
       if (res.lost) applySync({ ok: false, lost: true });
@@ -1351,11 +1417,11 @@ async function submitRoomPost(post) {
     roomCount += 1;
     finishSend(clean.post, res.queued
       ? 'おくりました。いまはつながっていないので、つながったら部屋に送ります。'
-      : `おくりました。部屋に届きました。${saved ? 'つぎの人に切り替えて、送れます。' : 'ただし、この端末には保存できませんでした。画面を閉じると消えます。'}`);
+      : `おくりました。部屋に届きました。${saved ? 'つぎの人に切り替えて、送れます。' : 'ただし、この端末には保存できませんでした。画面を閉じると消えます。'}`, opts);
     syncRoom();
   } finally {
     sending = false;
-    $('send').disabled = false;
+    setSendLocked(false);
   }
 }
 
@@ -1878,6 +1944,7 @@ for (const slot of document.querySelectorAll('[data-sprite]')) {
 }
 
 renderRoles();
+renderStamps();
 renderForm();
 renderPosts();
 renderRoom();
