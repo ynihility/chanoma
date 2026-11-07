@@ -4,6 +4,10 @@
 
 Built for *Built with Claude: Japan 2026*. All code, pixel art and sound effects in this repository were created during the event period (from 2026-11-02). No code, pictures or sounds from the author's earlier works were used.
 
+## Demo video
+
+**Coming soon.** A Japanese demo video (under 3 minutes) will be linked here before the submission deadline.
+
 ## Rooms: one show, on everyone's own device
 
 A family connects through a **room**. Everyone opens the same room on their own phone or PC, posts there, and watches the same program at 7 p.m.
@@ -108,6 +112,21 @@ your device  ->  the Chanoma server  ->  Anthropic API (Claude)
 
 Nothing here makes the service completely private. Please post only what your family is comfortable sharing with these services.
 
+## What is done, and what is not
+
+**Done and checked on the author's machine:** rooms and invite links, posts with cards and an optional line, stamps, the tea room, the level and the sending animation, the 7 p.m. program with Tele-kichi, the shelf, a built-in sample program that works without an API key, the server-side checks of Claude's reply, and the automated tests (`node --test`, 570 tests passing).
+
+**Not built on purpose:** read receipts, nagging, rankings, public pages, and health or loneliness claims.
+
+**Not built (possible later):** a list of who is in the room. The tea room shows kinds of animals, not people.
+
+**Not checked yet:**
+- Node.js versions other than v24.
+- Memory use on the free host.
+- Which `X-Forwarded-For` value is the real client address on the host.
+- How a screen reader reads the stamps and the tea room (only the label texts were checked).
+- The layout on real phones (it was checked at emulated widths of 360 to 430 px).
+
 ## Known limits
 
 These are known and not fixed. They are listed so that you can decide whether Chanoma suits your family.
@@ -123,7 +142,7 @@ These are known and not fixed. They are listed so that you can decide whether Ch
 - **Children should use it with a parent or guardian.** The app does not ask for ages.
 - **Plain `http` (for example on a home Wi-Fi) is not protected.** The device key then travels in plain text. Use `https` for anything other than trying it out on your own network.
 - **A late reply can land in the wrong shelf.** Right after you switch rooms, a delayed reply from the previous room can be saved into the new room's shelf.
-- **The free host may sleep.** The server keeps rooms in memory. If the host stops it, the server forgets, and the devices bring the programs back later.
+- **The free host may sleep.** The server keeps rooms in memory. If the host stops it, the server forgets, and the devices bring the programs back later. The first visit after a quiet spell can take about 60 seconds while the host wakes up. If your room is gone, make a new one; programs you watched stay on that device's shelf.
 - **Per-IP limits are a guide.** The client IP comes from `X-Forwarded-For`, so it depends on the proxy setup (see above). The cost caps do not depend on it.
 - **A program keeps the day's posts.** The posts' text is deleted from the server the next morning, but the program made from them keeps a copy for as long as the room is used (see "Where your data goes").
 - **Memory on a free host is not measured.** With 100 rooms × 30 programs the server was measured at about 285 MB on a development machine. The free tier of Render shows a memory limit of 512 MB, but its dashboard does not show the actual use on a free instance, so the use on the host is not verified.
@@ -167,6 +186,10 @@ No read receipts, no nagging, no rankings, nothing public, and no health or lone
 **夜7時の、かぞくニュース。** 祖父母・親・孫が、昼のあいだに、それぞれ一言ずつ投稿します。夜7時になると、司会の「テレ吉」が、Claude にみんなの投稿を番組に並べてもらい、昭和のブラウン管テレビで放送します。
 
 「Built with Claude: Japan 2026」のために作りました。このリポジトリのコード、ドット絵、効果音は、すべて開催期間中（2026年11月2日以降）に新しく作ったものです。作者の過去の作品のコード・絵・音は使っていません。
+
+## デモ動画
+
+**準備中です。** 3 分以内の日本語のデモ動画を、提出の締切までに、ここにリンクします。
 
 ## 部屋：それぞれの端末で、同じ番組を見る
 
@@ -272,6 +295,21 @@ Node.js 20.19 以上が必要です（`AbortSignal.any` を使うため。確認
 
 ここまでのことで、完全に私的になるわけではありません。投稿は、これらのサービスに預けても家族が納得できる内容にしてください。
 
+## できていること、まだのこと
+
+**できていて、作者のパソコンで確かめたもの:** 部屋と招待リンク、札と任意のひとこと付きの投稿、スタンプ、茶の間、レベルと送っている間の見せ方、司会テレ吉の夜7時の番組、本棚、API キーなしで動く内蔵の見本の番組、Claude の返事のサーバーでの検査、自動テスト（`node --test`、570 件が通っています）。
+
+**あえて作っていないもの:** 既読の表示、催促、ランキング、公開のページ、健康効果や孤独の解消をうたう表現。
+
+**作っていないもの（あとで作れるかもしれない）:** 部屋にいる人の一覧。茶の間に出るのは動物の種類で、人ではありません。
+
+**まだ確かめていないもの:**
+- Node.js の v24 以外の版。
+- 無料の置き場所でのメモリの使用量。
+- 置き場所で、`X-Forwarded-For` のどの値が本当の送り元の IP か。
+- スクリーンリーダーが、スタンプと茶の間をどう読み上げるか（札の文だけ確かめました）。
+- 実機のスマホでの見え方（幅 360〜430px の疑似的な画面で確かめました）。
+
 ## 既知の制限
 
 分かっていて、まだ直していないことです。ちゃのまが家族に合うかを決める助けにしてください。
@@ -287,7 +325,7 @@ Node.js 20.19 以上が必要です（`AbortSignal.any` を使うため。確認
 - **子どもは、保護者と一緒に使ってください。** 年齢は聞きません。
 - **`http`（家の Wi-Fi など）では守られません。** 端末の鍵が、そのまま（平文で）流れます。自分のネットワークで試すとき以外は、`https` を使ってください。
 - **部屋を切り替えた直後の遅れた返事が、新しい部屋の本棚に入ることがあります。**
-- **無料の置き場所は、止まることがあります。** サーバーは部屋をメモリに置いています。置き場所がサーバーを止めると、サーバーは忘れ、番組はあとで端末から戻ります。
+- **無料の置き場所は、止まることがあります。** サーバーは部屋をメモリに置いています。置き場所がサーバーを止めると、サーバーは忘れ、番組はあとで端末から戻ります。しばらく使われなかったあとは、最初に開いたときに、起きるまで約60秒かかることがあります。部屋が消えていたら、作り直してください。見た番組は、その端末の本棚に残ります。
 - **IP ごとの上限は目安です。** クライアントの IP は `X-Forwarded-For` から取るので、中継の設定に依存します（上の説明）。費用の上限は IP に頼りません。
 - **番組には、その日の投稿の写しが残ります。** 投稿の文は翌朝サーバーから消えますが、それから作った番組は、部屋が使われるあいだ写しを持ちます（「データの行き先」を参照）。
 - **無料の置き場所のメモリは測っていません。** 100部屋×30本で、開発に使うパソコンでは約285MBと測定しました。Render の無料枠のメモリの上限は 512MB と表示されますが、無料の枠では実際の使用量が管理画面に出ないため、置き場所での使用量は未確認です。
