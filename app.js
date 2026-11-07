@@ -8,6 +8,7 @@ import { createRoomClient, parseInvite, hasInvite, SYNC_MS } from './room.js';
 import { play, setMuted, hostBlips, stopBlips } from './sound.js';
 import { voiceSupported, listen } from './voice.js';
 import { spriteCanvas } from './pixel.js';
+import { LEVEL_KEY, xpOf, loadLevel, addXp, serializeLevel } from './level.js';
 
 // 演出（canvas）は飾り。読み込めなかったときも、投稿と放送は動かす
 let fx = null;
@@ -88,6 +89,14 @@ try {
   }
 } catch {
   // 保存が使えない環境でも、画面は動かす
+}
+
+// 自分のキャラのレベル。この端末の中だけに持つ（サーバーにも家族にも送らず、家族のレベルは出さない）
+let level = { xp: 0, level: 1 };
+try {
+  level = loadLevel(localStorage.getItem(LEVEL_KEY));
+} catch {
+  // 保存が使えない環境でも、画面は動かす（レベルはこの画面を開いているあいだだけ数える）
 }
 
 // 部屋（家族でつながるサーバー）とのやりとり。入っていないときは何も送らず、これまでどおり1台の中だけで動く
@@ -266,6 +275,7 @@ function renderForm() {
     profile().animal = v;
     renderForm();
   }, undefined, true);
+  renderLevel();
   if ($('nick').value !== profile().nick) $('nick').value = profile().nick;
   // よびかたの入力欄は、人を切り替えたときに合わせる（入力中は触らない）
   if (document.activeElement !== $('rename') && $('rename').value !== role) $('rename').value = role;
@@ -572,6 +582,111 @@ function setSendLocked(locked) {
   for (const b of $('stamps').querySelectorAll('button')) b.disabled = locked;
 }
 
+// ---- 送っている途中の見せ方 ----
+// 返事が早くても、「おくっています…」を最低 0.7 秒は見せてから「とどきました」（0.8 秒）で閉じる。
+// 「送っている途中」を一度見せてから終わらせると、「ちゃんと届いた」と感じやすいため
+const SEND_MIN_MS = 700;
+const SENT_SHOW_MS = 800;
+const DOT_MS = 300;
+// 送る操作が動いている最中か（Enter キーなど、ボタンを通らない入口からの二重の送りも止める）
+let busy = false;
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// 押したボタンを「おくっています…」にして、自分の動物をはねさせる。返す値で、返事が来たあとの閉じ方を決める。
+// settle: 最低 0.7 秒たつまで待つ／delivered: 「とどきました」を出して、0.8 秒後に元へ戻す／abort: すぐ元へ戻す（失敗のとき）
+function beginSending(button, animal) {
+  busy = true;
+  setSendLocked(true);
+  hopAnimal(animal);
+  // スタンプの札は、絵を残して、名前の文字だけを入れ替える
+  const label = button.querySelector('.stamp-name') ?? button;
+  const original = label.textContent;
+  const started = performance.now();
+  let dots = 1;
+  const paint = () => {
+    label.textContent = `おくっています${'・'.repeat(dots)}`;
+  };
+  paint();
+  // 動きを減らす設定の人には、点を動かさず、3つのままにする
+  let dotTimer = 0;
+  if (prefersReducedMotion()) {
+    dots = 3;
+    paint();
+  } else {
+    dotTimer = setInterval(() => {
+      dots = dots % 3 + 1;
+      paint();
+    }, DOT_MS);
+  }
+  say('おくっています…');
+  const ui = {
+    closed: false,
+    async settle() {
+      await wait(Math.max(0, SEND_MIN_MS - (performance.now() - started)));
+      clearInterval(dotTimer);
+    },
+    delivered() {
+      ui.closed = true;
+      clearInterval(dotTimer);
+      label.textContent = 'とどきました';
+      setTimeout(() => {
+        label.textContent = original;
+        busy = false;
+        setSendLocked(false);
+      }, SENT_SHOW_MS);
+    },
+    abort() {
+      if (ui.closed) return;
+      ui.closed = true;
+      clearInterval(dotTimer);
+      label.textContent = original;
+      busy = false;
+      setSendLocked(false);
+    },
+  };
+  return ui;
+}
+
+// ---- 自分のキャラのレベル ----
+// レベルの札（上の、よびかたの横）。動物を選んでいれば、その顔を添える
+function renderLevel() {
+  const face = $('level-face');
+  const animal = profile().animal;
+  face.replaceChildren(...(animal ? [spriteCanvas(animal, 2, undefined, { shadow: true })] : []));
+  $('level-num').textContent = `Lv.${level.level}`;
+}
+
+let levelMsgTimer = 0;
+// レベルが上がったときの一言。AI が考えた言葉ではなく、アプリの決まった言葉なので、「AI が考えた」とは読み上げない
+function showLevelUp() {
+  const msg = $('level-msg');
+  const chip = el('span', 'テレ吉', 'level-chip');
+  chip.setAttribute('role', 'img');
+  chip.setAttribute('aria-label', 'テレ吉（アプリの決まった言葉）');
+  msg.replaceChildren(chip, 'レベルが上がりました。次の一言も、楽しみにしています。');
+  msg.hidden = false;
+  clearTimeout(levelMsgTimer);
+  levelMsgTimer = setTimeout(() => {
+    msg.hidden = true;
+  }, 3000);
+}
+
+// 送れた投稿の分だけ、経験値を足して保存する。上がったときは、札をはねさせて、一言を出す
+function gainXp(post) {
+  const next = addXp(level, xpOf(post));
+  level = { xp: next.xp, level: next.level };
+  try {
+    localStorage.setItem(LEVEL_KEY, serializeLevel(level));
+  } catch {
+    // 保存できなくても、この画面を開いているあいだは数える
+  }
+  renderLevel();
+  if (next.up) {
+    popEl($('level-badge'), 'sparkle');
+    showLevelUp();
+  }
+}
+
 // スタンプの札を作る。ボタンは最初に1回だけ作る（作り直すと、キーボードのフォーカスが消えるため）
 function renderStamps() {
   const box = $('stamps');
@@ -588,6 +703,7 @@ function renderStamps() {
 }
 
 function submitPost() {
+  if (busy) return;
   cancelVoice();
   popEl($('send'), 'pop');
   // 字数が上限をこえているあいだは送らない。入力欄の文字は消さず、何字多いかを伝える
@@ -627,23 +743,34 @@ function submitPost() {
 }
 
 // 1台のとき: 検査して、保存して、送れたことを画面に出す。opts は finishSend と同じ
-function sendLocal(post, opts = {}) {
+async function sendLocal(post, opts = {}) {
+  const button = opts.button ?? $('send');
   const r = cleanPosts({ posts: [...state.posts, post], nextDate: state.nextDate });
   if (!r.ok) {
-    popEl(opts.button ?? $('send'), 'shake');
+    popEl(button, 'shake');
     play('error');
     say(r.error);
     return;
   }
-  dropUndo();
-  state = { posts: r.posts, ...keep() };
-  const saved = save();
-  finishSend(post, saved ? 'おくりました。つぎの人に切り替えて、送れます。' : 'おくりました。ただし、この端末には保存できませんでした。画面を閉じると消えます。', opts);
+  const ui = beginSending(button, post.animal);
+  try {
+    dropUndo();
+    state = { posts: r.posts, ...keep() };
+    const saved = save();
+    // 1台のときは返事を待たないので、「おくっています…」を最低の長さだけ見せる
+    await ui.settle();
+    finishSend(post, saved ? 'おくりました。つぎの人に切り替えて、送れます。' : 'おくりました。ただし、この端末には保存できませんでした。画面を閉じると消えます。', opts);
+    ui.delivered();
+  } finally {
+    // 途中で例外が出ても、ボタンが押せないまま残らないようにする
+    ui.abort();
+  }
 }
 
 // スタンプを送る。お題・見出し・ひとことは要らず、スタンプの名前だけを投稿にする。
 // 書きかけのひとことや、えらんだ札は、スタンプのために消さない
 function submitStamp(name, button) {
+  if (busy) return;
   popEl(button, 'pop');
   if (postLimitReached(button)) return;
   const post = { id: newId(), who: role, name: profile().nick, animal: profile().animal, kind: 'stamp', stamp: name };
@@ -660,7 +787,7 @@ function submitStamp(name, button) {
 function finishSend(post, message, opts = {}) {
   popEl(opts.button ?? $('send'), 'sparkle');
   play('send');
-  hopAnimal(post.animal);
+  gainXp(post);
   if (!opts.keepForm) {
     // 手順の丸を、少しのあいだ全部「できた」にする
     sentBy = role;
@@ -1392,11 +1519,13 @@ async function submitRoomPost(post, opts = {}) {
     return;
   }
   sending = true;
-  setSendLocked(true);
+  const ui = beginSending(button, post.animal);
   try {
     const res = await rc.post(clean.post);
     if (!roomOn()) return;
     if (!res.ok) {
+      // 失敗は、すぐ元に戻して、理由を出す
+      ui.abort();
       popEl(button, 'shake');
       play('error');
       say(res.reason ? bannedMessage(res.reason) : res.error);
@@ -1415,13 +1544,17 @@ async function submitRoomPost(post, opts = {}) {
     state = { posts: next, ...keep() };
     const saved = save();
     roomCount += 1;
+    // 返事が早くても、「おくっています…」を最低の長さだけ見せる
+    await ui.settle();
     finishSend(clean.post, res.queued
       ? 'おくりました。いまはつながっていないので、つながったら部屋に送ります。'
       : `おくりました。部屋に届きました。${saved ? 'つぎの人に切り替えて、送れます。' : 'ただし、この端末には保存できませんでした。画面を閉じると消えます。'}`, opts);
+    ui.delivered();
     syncRoom();
   } finally {
     sending = false;
-    setSendLocked(false);
+    // 途中で戻った・例外が出たときも、ボタンが押せないまま残らないようにする（delivered のあとは何もしない）
+    ui.abort();
   }
 }
 

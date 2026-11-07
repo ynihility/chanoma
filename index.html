@@ -358,6 +358,48 @@
       word-break: auto-phrase;
     }
 
+    /* 自分のキャラのレベルの札と、レベルが上がったときの一言 */
+    .level-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--gap-2);
+      min-height: 48px;
+      padding: 0 var(--gap-3);
+      font-weight: 700;
+      font-size: 24px;
+      color: var(--ink);
+      background: var(--paper);
+      border: 3px solid var(--ink);
+      border-radius: 24px;
+      box-shadow: 3px 3px 0 var(--shade);
+    }
+    .level-face:empty { display: none; }
+    .level-msg {
+      margin: var(--gap-3) 0 0;
+      padding: var(--gap-3) var(--gap-4);
+      font-weight: 700;
+      line-height: 1.5;
+      color: var(--ink);
+      background: var(--paper);
+      border: 3px solid var(--ink);
+      border-left: 14px solid var(--yamabuki);
+      border-radius: 4px;
+      box-shadow: var(--drop);
+      overflow-wrap: anywhere;
+      word-break: auto-phrase;
+    }
+    /* アプリの決まった言葉の「テレ吉」の札。AI が考えた言葉の札（ai-chip）とは、別の名前にしてある */
+    .level-chip {
+      display: inline-block;
+      margin-right: var(--gap-2);
+      padding: 0 10px;
+      font-family: var(--font-dot);
+      color: var(--crt);
+      background: var(--yamabuki);
+      border-radius: 4px;
+    }
+    body.night #level-badge { display: none; }
+
     /* 画面の読み上げだけに出す文字（見た目には出さない） */
     .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
@@ -1149,13 +1191,15 @@
   <header>
     <h1>ちゃのま</h1>
     <div class="row" id="roles" role="group" aria-label="だれが使いますか"></div>
+    <!-- 自分のキャラのレベル（この端末だけ。家族のレベルは出さない） -->
+    <span id="level-badge" class="level-badge"><span id="level-face" class="level-face" aria-hidden="true"></span><span id="level-num">Lv.1</span></span>
     <span class="spacer"></span>
     <button id="sound" type="button">音を消す</button>
     <button id="evening" class="primary">夜7時にする</button>
   </header>
 
   <!-- 上の案内（おくったあと・夜7時にできないとき）。読み上げの入れ物は、はじめから置いておく -->
-  <div class="top-live" role="status"><p id="top-msg" class="top-msg" hidden></p></div>
+  <div class="top-live" role="status"><p id="top-msg" class="top-msg" hidden></p><p id="level-msg" class="level-msg" hidden></p></div>
 
   <!-- 部屋の帯。入っていないときは1台の中だけで動く。入っているときは、家族の投稿と番組を部屋でそろえる -->
   <section id="room-bar" class="room-bar" aria-labelledby="room-title">
