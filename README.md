@@ -6,7 +6,7 @@ Built for *Built with Claude: Japan 2026*. All code, pixel art and sound effects
 
 ## Demo video
 
-**Coming soon.** A Japanese demo video (under 3 minutes) will be linked here before the submission deadline.
+Watch the Japanese demo video (2 min 42 s): https://youtu.be/zhEXemxioEQ
 
 ## Rooms: one show, on everyone's own device
 
@@ -189,7 +189,7 @@ No read receipts, no nagging, no rankings, nothing public, and no health or lone
 
 ## デモ動画
 
-**準備中です。** 3 分以内の日本語のデモ動画を、提出の締切までに、ここにリンクします。
+日本語のデモ動画（2 分 42 秒）: https://youtu.be/zhEXemxioEQ
 
 ## 部屋：それぞれの端末で、同じ番組を見る
 
