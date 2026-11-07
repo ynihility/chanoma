@@ -245,4 +245,152 @@ export const SPRITES = {
       '............',
     ],
   },
+  // ---- スタンプ（16×16）。投稿の stamp の値と同じ名前を、「スタンプ:」の後ろに付けて引く ----
+  // 装飾の「みかん」「湯呑」（12×12）とは別の絵なので、名前が重ならないように接頭辞を付けている
+  // ゆのみ
+  'スタンプ:ゆのみ': {
+    w: 16, h: 16, rows: [
+      '................',
+      '.....W..W.......',
+      '......W..W......',
+      '.....W..W.......',
+      '................',
+      '..kkkkkkkkkkkk..',
+      '.kLLLLLLLLLLLak.',
+      '.kLGGGggggggvak.',
+      '.kkkkkkkkkkkkkk.',
+      '.kLaaaaaaaaaavk.',
+      '.kLaaaaaaaaaavk.',
+      '.kLappppppppavk.',
+      '.kLaaaaaaaaaavk.',
+      '..kLaaaaaaaavk..',
+      '...kvvvvvvvvk...',
+      '....kkkkkkkk....',
+    ],
+  },
+  // みかん
+  'スタンプ:みかん': {
+    w: 16, h: 16, rows: [
+      '................',
+      '.......kk.......',
+      '......kwwk.kk...',
+      '.....kkwwkkggk..',
+      '....koyooook....',
+      '...koyyoooook...',
+      '..koyyoooooook..',
+      '.koyooooooooosk.',
+      '.kooooooooooook.',
+      '.koooooooooossk.',
+      '.kooooooooosssk.',
+      '..koooooossssk..',
+      '...koooossssk...',
+      '....kssssssk....',
+      '.....kkkkkk.....',
+      '................',
+    ],
+  },
+  // おにぎり
+  'スタンプ:おにぎり': {
+    w: 16, h: 16, rows: [
+      '................',
+      '.......kk.......',
+      '......kWWk......',
+      '.....kWWppk.....',
+      '....kWWpppek....',
+      '...kWWppppeek...',
+      '..kWWppppppeek..',
+      '.kWWpppppppppek.',
+      '.kWpppppppppeek.',
+      '.kWpvvvvvvvvpek.',
+      '.kWpddddddddpek.',
+      '.kWpddddddddpek.',
+      '.kepddddddddeek.',
+      '.keppppppppeeek.',
+      '..kkkkkkkkkkkk..',
+      '................',
+    ],
+  },
+  // はな
+  'スタンプ:はな': {
+    w: 16, h: 16, rows: [
+      '................',
+      '.....kkkkkk.....',
+      '.....kWPPPk.....',
+      '.....kPPPPk.....',
+      '..kkkkPPPPkkkk..',
+      '.kWPPPyyyyPPPrk.',
+      '.kPPPPyyyoPPPrk.',
+      '.kPPPPooooPPPrk.',
+      '..kkkkPPPrkkkk..',
+      '.....kPPPrk.....',
+      '.....kPPrrk.....',
+      '.....kkkkkk.....',
+      '......kgvk......',
+      '......kgvkkkk...',
+      '......kgvkGGgk..',
+      '......kkkkkkkk..',
+    ],
+  },
+  // ほし
+  'スタンプ:ほし': {
+    w: 16, h: 16, rows: [
+      '................',
+      '.......kk.......',
+      '......kWyk......',
+      '......kWyk......',
+      '.....kWyyyk.....',
+      'kkkkkkWyyyykkkkk',
+      'kWyyyyyyyyyyyyok',
+      '.kWyyyyyyyyyyok.',
+      '..kyyyyyyyyyok..',
+      '...kyyyyyyyok...',
+      '...kyyyyyyoook..',
+      '..kyyyykkyyyook.',
+      '..kyyyk..kyyok..',
+      '.kyyyk....kyyok.',
+      '.kyyk......kyok.',
+      '.kkk........kkk.',
+    ],
+  },
+  // ふとん
+  'スタンプ:ふとん': {
+    w: 16, h: 16, rows: [
+      '................',
+      '................',
+      '................',
+      '................',
+      '..kkkkk.........',
+      '.kWWWWpkkkkkkkk.',
+      '.kWpppppkLLLaaak',
+      '.kppppppkLaaaaak',
+      '.kkkkkkkkaaaaavk',
+      '.kkkkkkkkkkkkkk.',
+      '.kWWWWWWWWWWWWk.',
+      '.kpppppppppppek.',
+      '.kpppppppppeeek.',
+      '..kkkkkkkkkkkk..',
+      '................',
+      '................',
+    ],
+  },
 };
+
+// ---- 家族の茶の間の、動物の胴（8×6）----
+// 顔のスプライトの下に足して、歩く（足の 2 コマ）・座る姿にする。色は動物ごとに B（体）と D（影）を置き換える。
+// すずめとかめは、顔の絵がもう全身の横向きなので、胴を足さない（足すと体が二重になる）
+const BODY_FRAMES = {
+  '立1': ['.kBBBBk.', 'kBBBBBDk', 'kBBBBDDk', '.kBBDDk.', '.kk..kk.', '.k....k.'],
+  '立2': ['.kBBBBk.', 'kBBBBBDk', 'kBBBBDDk', '.kBBDDk.', '..kkkk..', '..k..k..'],
+  '座': ['.kBBBBk.', 'kBBBBBDk', 'kBBBBDDk', 'kBDDDDDk', 'kkkkkkkk', '........'],
+};
+const BODY_COLORS = {
+  'ねこ': { B: 'c', D: 'b' },
+  'いぬ': { B: 'b', D: 'w' },
+  'うさぎ': { B: 'p', D: 'e' },
+  'くま': { B: 'w', D: 's' },
+};
+for (const [animal, colors] of Object.entries(BODY_COLORS)) {
+  for (const [frame, rows] of Object.entries(BODY_FRAMES)) {
+    SPRITES[`からだ:${animal}:${frame}`] = { w: 8, h: 6, rows: rows.map((r) => [...r].map((ch) => colors[ch] ?? ch).join('')) };
+  }
+}
