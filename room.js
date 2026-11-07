@@ -403,8 +403,6 @@ export function createRoomClient(env = {}) {
     shelf: () => [...shelf()],
     todayProgram: () => todayProgram,
     latePosts,
-    // 部屋のきょうの投稿に出てきた動物の名前だけ（茶の間に出す動物のため）。よびかたや投稿の中身は返さない
-    animals: () => [...new Set([...roomPosts.values()].map((e) => e.post.animal).filter(Boolean))],
 
     // 新しい部屋を作って、入る
     async create() {

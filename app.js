@@ -298,11 +298,14 @@ function renderForm() {
 
 // ---- 家族の茶の間 ----
 // 茶の間に出す動物。この端末で選んだ動物と、部屋に出てきた動物（部屋に入っていなければ、この端末の投稿の動物）。
-// 動物の名前だけを集める。だれが投稿したか・していないかは、ここでは見ない
+// 部屋の動物は、番組になった投稿（きょうの番組と本棚）だけから取る。番組のテレビにはもう出ている人なので、
+// 「いま、だれが投稿したか」が茶の間から分からない（きょうの投稿の途中経過は、茶の間に入れない）。
+// 動物の名前だけを集める
 function syncChaNoMa() {
   if (!chanoma) return;
   const mine = Object.values(profiles).map((p) => p.animal);
-  const others = roomOn() ? rc.animals() : state.posts.map((p) => p.animal);
+  const broadcast = [...rc.shelf().flatMap((item) => item.posts), ...(rc.todayProgram()?.posts ?? [])];
+  const others = roomOn() ? broadcast.map((p) => p.animal) : state.posts.map((p) => p.animal);
   const names = chanomaMod.rosterOf(mine, others);
   chanoma.setAnimals(names);
   $('chanoma-count').textContent = chanomaMod.countText(names.length);
@@ -912,6 +915,7 @@ function setView(onAir, shelf = false) {
   document.body.classList.toggle('night', onAir);
   // 茶の間の動物は、番組を見ているあいだ、テレビの前に集まる
   chanoma?.setWatching(onAir);
+  syncChaNoMa();
   // 押したボタンは隠れるので、フォーカスを新しい画面に移す（キーボードや読み上げの人が迷子にならないように）。
   // テレビのほうは、フォーカスで勝手に動かさず、tvToTop で先頭へ寄せる
   if (onAir) {
@@ -1629,6 +1633,7 @@ async function syncRoom() {
   const e = await rc.exchange();
   if (e.ok && e.received > 0 && roomOn()) {
     roomSay(`ほかの端末から、${e.received}本の番組が本棚に戻りました。`);
+    syncChaNoMa();
     if (!$('shelf-view').hidden) renderShelf();
   }
 }
