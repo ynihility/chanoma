@@ -18,7 +18,7 @@ A family connects through a **room**. Everyone opens the same room on their own 
 ## Stamps, the tea room and levels
 
 - **Stamps.** Instead of writing, a family member can send one of six pixel-art stamps (a teacup, a mandarin, a rice ball, a flower, a star, a futon) with one tap. Claude introduces a stamp by name in the "today's words" corner and adds no meaning to it. Stamps count toward the 30 posts a day.
-- **Tea room.** A small pixel-art living room at the top of the page shows the animals of the family. They walk, sit and hop at random, whether or not anyone has posted. At 7 p.m. the TV lights up and they gather in front of it. It pauses when the tab is hidden and stays still under "reduce motion".
+- **Tea room.** A small pixel-art living room at the top of the page shows the animals of the family. They walk, sit and hop at random, whether or not anyone has posted. At 7 p.m. the TV lights up and they gather in front of it. It pauses when the tab is hidden and stays still under "reduce motion". The line "Today's tea room: N kinds of animals" counts the kinds of animals on screen, not the people in the room; it is decoration, not attendance.
 - **Level.** Your own character levels up as you post (+3 per post, +1 per stamp), with a short sending animation ("sending..." then "arrived"). The level lives only in this device's localStorage. It is never sent anywhere and never compared with other family members.
 
 ## How to try it
@@ -182,7 +182,7 @@ No read receipts, no nagging, no rankings, nothing public, and no health or lone
 ## スタンプ、茶の間、レベル
 
 - **スタンプ。** 文字を書かなくても、6 種のドット絵のスタンプ（ゆのみ・みかん・おにぎり・はな・ほし・ふとん）を、ワンタッチで送れます。テレ吉は、きょうの一言のコーナーで、スタンプの名前を言って紹介します。意味は足しません。スタンプも、1 日 30 件の上限に数えます。
-- **茶の間。** 画面の上の小さなドット絵の茶の間に、家族の動物が出ます。歩く・座る・はねるは乱数で決まり、だれかが投稿したかどうかでは変わりません。夜 7 時はテレビが光り、動物がテレビの前に集まります。タブが見えないときは止まり、「動きを減らす」設定のときは静止画になります。
+- **茶の間。** 画面の上の小さなドット絵の茶の間に、家族の動物が出ます。歩く・座る・はねるは乱数で決まり、だれかが投稿したかどうかでは変わりません。夜 7 時はテレビが光り、動物がテレビの前に集まります。タブが見えないときは止まり、「動きを減らす」設定のときは静止画になります。「きょうの茶の間: どうぶつ N 種類」は、画面に出ている動物の種類の数で、部屋にいる人の数ではありません。出席の確認ではなく、飾りです。
 - **レベル。** 投稿すると、自分のキャラのレベルが上がります（投稿 +3、スタンプ +1）。送っている間は「おくっています」、届くと「とどきました」と出ます。レベルは、この端末の localStorage にだけあり、どこにも送らず、家族のレベルとも比べません。
 
 ## 試しかた

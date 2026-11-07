@@ -28,10 +28,10 @@ test('rosterOf: 渡すのは動物の名前だけで、よびかたを受け取�
   assert.deepEqual(rosterOf(['おばあちゃん', 'まご', 'ねこ']), ['ねこ']);
 });
 
-test('countText: 人数だけを言う。「みんな投稿した」とは言わない', () => {
-  assert.equal(countText(3), 'きょうの茶の間: 3 人');
-  assert.equal(countText(1), 'きょうの茶の間: 1 人');
-  for (const n of [0, 1, 6]) assert.ok(!/投稿|みんな|そろ/.test(countText(n)), countText(n));
+test('countText: 動物の種類の数を言う。「人」とも「みんな投稿した」とも言わない', () => {
+  assert.equal(countText(3), 'きょうの茶の間: どうぶつ 3 種類');
+  assert.equal(countText(1), 'きょうの茶の間: どうぶつ 1 種類');
+  for (const n of [0, 1, 6]) assert.ok(!/人|投稿|みんな|そろ/.test(countText(n)), countText(n));
 });
 
 test('fitScale: 幅に収まる整数倍。320 に満たなければ null', () => {
