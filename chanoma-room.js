@@ -89,8 +89,8 @@ function moveToward(c, tx, ty, speed = 1) {
   if (dx !== 0) c.dir = Math.sign(dx);
   return c.x === tx && c.y === ty;
 }
-// 夜 7 時に集まるときは、急いで歩く（1 コマに 3 ドット。部屋の端からでも 10 秒ほどで着く）
-const WATCH_SPEED = 3;
+// 夜 7 時に集まるときは、急いで歩く（1 コマに 4 ドット。部屋の端からでも 7 秒ほどで着く）
+const WATCH_SPEED = 4;
 
 // 1 コマ進める。watching が true のあいだは、テレビの前の席へ向かって座る
 export function stepCreature(c, rng, watching = false) {
