@@ -220,8 +220,11 @@ function renderChoices(containerId, items, current, onPick, emptyText, withIcon 
         }
         // もう一度押すと、選びなおせるように印を外す
         b.addEventListener('click', () => {
+          // 押す前の印で見分ける。選ぶ札は「ぽん」も付き、外す札は、はねるだけ
+          const wasOn = b.getAttribute('aria-pressed') === 'true';
+          popEl(b, wasOn ? 'pop' : 'pon');
           play('tap');
-          onPick(b.getAttribute('aria-pressed') === 'true' ? '' : item);
+          onPick(wasOn ? '' : item);
         });
         return b;
       }));
@@ -304,6 +307,7 @@ function renderRoles() {
       const b = el('button');
       b.type = 'button';
       b.addEventListener('click', () => {
+        popEl(b, 'pon');
         play('tap');
         cancelVoice();
         role = roles()[i];
@@ -326,6 +330,7 @@ function renameRole() {
   const old = role;
   // 字数が上限をこえているあいだは変えない。入力した文字は消さず、何字多いかを伝える
   if (overBy('rename') > 0) {
+    popEl($('rename'), 'shake');
     play('error');
     say(`よびかたが ${overBy('rename')}字 多いので、かえられません。けずってから、もう一度「なまえをかえる」を押してください。`);
     return;
@@ -339,6 +344,7 @@ function renameRole() {
   const checked = cleanRoles(roles().map((r) => (r === old ? name : r)));
   if (!checked.ok) {
     // 打ち直さなくてよいように、入力した文字は消さない
+    popEl($('rename'), 'shake');
     play('error');
     say(checked.error);
     return;
@@ -486,15 +492,65 @@ function hopAnimal(animal) {
   setTimeout(() => hop.remove(), 1500);
 }
 
+// ボタンや入力欄に、短い動きを付ける飾り（CSS の pop / pon / pop-sparkle / shake）。
+// kind: 'pop'（つぶれてはねる）、'pon'（選ばれた札。はねながら、ぽんと大きくなる）、
+//       'sparkle'（はねながら、星を6つ散らす）、'shake'（左右にゆれる）
+const POP_CLASSES = ['pop', 'pon', 'pop-sparkle', 'shake'];
+const POP_KINDS = { pop: ['pop'], pon: ['pop', 'pon'], sparkle: ['pop-sparkle'], shake: ['shake'] };
+// 終わりの合図にする動き。星はボタンより長く動くので、星の動きが終わるまで待つ
+const POP_END = { pop: 'pop-squash', pon: 'pop-squash', sparkle: 'spark-fly', shake: 'shake-x' };
+// 動き中の要素ごとの片づけ関数。続けて押されたときに、前の動きを先に片づけるために持つ
+const popClear = new WeakMap();
+function popEl(target, kind = 'pop') {
+  if (!target || prefersReducedMotion()) return;
+  // 前の動きが残っていれば先に片づける（クラスを外した状態で画面の計算を挟むと、動きが最初から始まる）
+  popClear.get(target)?.();
+  void target.offsetWidth;
+  target.classList.add(...POP_KINDS[kind]);
+  // 星は、ボタンの中ではなく、ページの上に重ねる。「夜7時にする」は待っているあいだに文字を入れ替えるので、
+  // 中に入れると星ごと消えてしまうため。ボタンの中心に、画面の動きに付いてくる位置で置く
+  let burst = null;
+  if (kind === 'sparkle') {
+    const box = target.getBoundingClientRect();
+    burst = el('span', undefined, 'spark-burst');
+    burst.setAttribute('aria-hidden', 'true');
+    burst.style.left = `${box.left + box.width / 2 + window.scrollX}px`;
+    burst.style.top = `${box.top + box.height / 2 + window.scrollY}px`;
+    for (let i = 0; i < 6; i++) burst.append(el('span', undefined, 'spark'));
+    document.body.append(burst);
+  }
+  // 動きが終わったら外す。決めた動きの終わりの合図だけを見る（星のときは、星の入れ物に届く合図）。
+  // 画面が切り替わって要素が隠れると、動きは「終わり」ではなく「中止」になるので、中止でも外す。
+  // どちらの合図も来なかったときも、残らないように時間でも外す（初回の音の準備で画面が止まっても、動きの途中で切れないよう長めにする）
+  const host = burst ?? target;
+  const done = () => {
+    clearTimeout(timer);
+    host.removeEventListener('animationend', onEnd);
+    host.removeEventListener('animationcancel', onEnd);
+    target.classList.remove(...POP_CLASSES);
+    burst?.remove();
+    popClear.delete(target);
+  };
+  const onEnd = (e) => {
+    if (e.animationName === POP_END[kind]) done();
+  };
+  const timer = setTimeout(done, 1500);
+  host.addEventListener('animationend', onEnd);
+  host.addEventListener('animationcancel', onEnd);
+  popClear.set(target, done);
+}
+
 // 投稿のIDは、safe.js の決まり（英数字と - _ で20文字まで）に合わせる
 const newId = () => `p${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-5)}`;
 
 function submitPost() {
   cancelVoice();
+  popEl($('send'), 'pop');
   // 字数が上限をこえているあいだは送らない。入力欄の文字は消さず、何字多いかを伝える
   // （入力欄の maxlength で黙って切ると、変換で確定した語が途中で切れるため、入力はそのまま受けている）
   const tooLong = ['nick', 'text'].filter((id) => overBy(id) > 0).map((id) => `${LIMITS[id].label}が ${overBy(id)}字`);
   if (tooLong.length > 0) {
+    for (const id of ['nick', 'text']) if (overBy(id) > 0) popEl($(id), 'shake');
     play('error');
     say(`${tooLong.join('、')} 多いので、送れません。けずってから、もう一度おくってください。`);
     return;
@@ -502,12 +558,14 @@ function submitPost() {
   const askDate = pick.topic === WISH_DATE_TOPIC;
   const wishDate = askDate ? $('wish-date').value : '';
   if (!pick.topic || (askDate ? !wishDate : !pick.card)) {
+    popEl($('send'), 'shake');
     play('error');
     say(askDate ? '会いたい日を、えらんでください。' : 'お題と札を、えらんでください。');
     return;
   }
   // 会いたい日の希望は、今日より前の日にちにはできない
   if (askDate && daysUntil(wishDate) < 0) {
+    popEl($('wish-date'), 'shake');
     play('error');
     say('今日より前の日にちは、えらべません。');
     return;
@@ -515,6 +573,7 @@ function submitPost() {
   // 部屋では、一覧に見えている自分の投稿だけを数える（ほかの部屋や、入る前の投稿は見えず、消せないため）
   const shown = roomOn() ? state.posts.filter((p) => rc.isMine(p.id)).length : state.posts.length;
   if (shown >= MAX_POSTS) {
+    popEl($('send'), 'shake');
     play('error');
     say(`投稿は${MAX_POSTS}件までです。いらない投稿を消してください。`);
     return;
@@ -529,6 +588,7 @@ function submitPost() {
   }
   const r = cleanPosts({ posts: [...state.posts, post], nextDate: state.nextDate });
   if (!r.ok) {
+    popEl($('send'), 'shake');
     play('error');
     say(r.error);
     return;
@@ -541,6 +601,7 @@ function submitPost() {
 
 // 送れたあとの画面の更新（1台のときも、部屋のときも同じ）
 function finishSend(post, message) {
+  popEl($('send'), 'sparkle');
   play('send');
   hopAnimal(post.animal);
   // 手順の丸を、少しのあいだ全部「できた」にする
@@ -578,6 +639,7 @@ function changeDate() {
   // 入れられない日付のときは、欄を前の日付に戻す（画面と保存の食い違いを防ぐ）
   const reject = (message) => {
     $('next-date').value = state.nextDate ?? '';
+    popEl($('next-date'), 'shake');
     play('error');
     say(message);
   };
@@ -955,6 +1017,7 @@ function showError(message, { retry = true } = {}) {
   const goFail = el('p', undefined, 'notice');
   goFail.hidden = true;
   go.addEventListener('click', () => {
+    popEl(go, 'pop');
     play('tap');
     goFail.hidden = true;
     watchSample((text) => {
@@ -1097,8 +1160,10 @@ async function goEvening() {
   if (state.posts.length === 0) {
     // 押したボタンの近く（上）に、読める大きさで出す
     sayTop('投稿が1件以上あると、番組を作れます。');
+    popEl($('evening'), 'shake');
     return;
   }
+  popEl($('evening'), 'sparkle');
   // 番組ができていて、投稿も変わっていなければ、作り直さずにそのまま見せる
   if (isReady()) {
     watch(ready, false);
@@ -1241,6 +1306,7 @@ async function submitRoomPost(post) {
   if (sending) return;
   const clean = cleanPost(post);
   if (!clean.ok) {
+    popEl($('send'), 'shake');
     play('error');
     say(clean.error);
     return;
@@ -1248,11 +1314,13 @@ async function submitRoomPost(post) {
   // サーバーでも同じ検査をするが、送る前に止めたほうが早く伝えられる
   const words = checkPostWords(clean.post);
   if (!words.ok) {
+    popEl($('send'), 'shake');
     play('error');
     say(bannedMessage(words.reason));
     return;
   }
   if (roomCount >= MAX_POSTS) {
+    popEl($('send'), 'shake');
     play('error');
     say(`きょうは${MAX_POSTS}件までです。`);
     return;
@@ -1263,6 +1331,7 @@ async function submitRoomPost(post) {
     const res = await rc.post(clean.post);
     if (!roomOn()) return;
     if (!res.ok) {
+      popEl($('send'), 'shake');
       play('error');
       say(res.reason ? bannedMessage(res.reason) : res.error);
       if (res.lost) applySync({ ok: false, lost: true });
@@ -1465,6 +1534,7 @@ async function goRoomEvening() {
   // もう部屋にきょうの番組があれば、作らずにそれを流す
   const known = rc.todayProgram();
   if (known && known.date === rc.today()) {
+    popEl($('evening'), 'sparkle');
     showRoomProgram(known, { made: false, fromWaiting: false });
     return;
   }
@@ -1482,13 +1552,16 @@ async function goRoomEvening() {
     }
     if (synced.ok && synced.program) {
       waiting = false;
+      popEl($('evening'), 'sparkle');
       showRoomProgram(synced.program, { made: false, fromWaiting: false });
       return;
     }
     if (synced.ok && synced.count === 0) {
       sayTop('投稿が1件以上あると、番組を作れます。');
+      popEl($('evening'), 'shake');
       return;
     }
+    popEl($('evening'), 'sparkle');
     showWaiting();
     const res = await rc.makeNews(state.nextDate);
     if (!roomOn()) return;
@@ -1572,8 +1645,10 @@ $('room-join-open').addEventListener('click', () => {
 let joining = false;
 async function enterByCode() {
   if (joining) return;
+  popEl($('room-enter'), 'pop');
   const typed = $('room-code').value.trim();
   if (!typed) {
+    popEl($('room-code'), 'shake');
     play('error');
     roomSay('部屋のコードを入れてください。');
     return;
@@ -1589,6 +1664,7 @@ async function enterByCode() {
       $('room-code').value = '';
       roomSay(r.same ? 'いま入っている部屋です。' : `部屋に入りました。${carryNote(r.carried)}`);
     } else if (!r.cancelled) {
+      popEl($('room-code'), 'shake');
       play('error');
       roomSay(r.error);
     }
@@ -1693,7 +1769,10 @@ $('clear').addEventListener('click', () => {
   save();
   renderPosts();
 });
-$('evening').addEventListener('click', goEvening);
+$('evening').addEventListener('click', () => {
+  popEl($('evening'), 'pop');
+  goEvening();
+});
 $('retry').addEventListener('click', goEvening);
 $('sample').addEventListener('click', () => {
   play('tap');
@@ -1701,6 +1780,7 @@ $('sample').addEventListener('click', () => {
   watchSample(sampleMsg);
 });
 $('next').addEventListener('click', () => {
+  popEl($('next'), 'pop');
   // 演出の途中で押されたら、演出だけを終わらせて、いまの場面をすぐ見せる（場面は飛ばさない）
   if (run) {
     cancelFx();

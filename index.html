@@ -477,6 +477,64 @@
       100% { transform: scaleX(1); opacity: 0; }
     }
 
+    /* ===== ボタンのポップ演出（app.js の popEl が、クラスを付けて、終わったら外す） =====
+       押した手ごたえを、動きで返す飾り。どれも scale / translate の単独プロパティで動かす。
+       選ばれた札や押している最中のボタンは transform: translateY(3px) で沈んでいるので、
+       transform を上書きしない単独プロパティなら、沈みが消えて跳ねることがない。
+       どれもレイアウトを動かさないので、周りの札はずれない。 */
+    /* はねる・つぶれる: つぶれる → 伸びる → 戻る（0.32秒） */
+    .pop, .pop-sparkle { animation: pop-squash 320ms ease-out both; }
+    @keyframes pop-squash {
+      0% { scale: 1 1; }
+      35% { scale: 1.15 0.85; }
+      70% { scale: 0.92 1.1; }
+      100% { scale: 1 1; }
+    }
+    /* 選んだ札の「ぽん」: 軽く大きくなって戻る（0.2秒）。選ばれた札は 3px 沈んでいるので、沈みを含めて動かす。
+       つぶれる動きと同時に動かすので、animation は2つを並べて1つの規則にする（別々に書くと後の方だけが効く） */
+    .pop.pon { animation: pop-squash 320ms ease-out both, pop-pon 200ms ease-out both; }
+    @keyframes pop-pon {
+      0%, 100% { transform: translateY(3px) scale(1); }
+      50% { transform: translateY(3px) scale(1.06); }
+    }
+    /* キラキラ: ドット絵の四角い星が、ボタンの中心から6方向に飛んで消える（0.5秒）。
+       星の入れ物は、app.js がページの上に重ねる（ボタンの中に入れると、ボタンの文字を入れ替えたときに消えるため）。
+       入れ物は大きさのない点で、位置（left / top）は app.js が、ボタンの中心に合わせる */
+    .spark-burst { position: absolute; width: 0; height: 0; z-index: 50; pointer-events: none; }
+    .spark {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 6px;
+      height: 6px;
+      margin: -3px 0 0 -3px;
+      background: var(--yamabuki);
+      box-shadow: 0 0 0 2px var(--ink);
+      pointer-events: none;
+      animation: spark-fly 500ms steps(6, end) both;
+    }
+    .spark:nth-child(even) { width: 4px; height: 4px; margin: -2px 0 0 -2px; }
+    .spark:nth-child(1) { --dx: -96px; --dy: -40px; }
+    .spark:nth-child(2) { --dx: 0px; --dy: -54px; }
+    .spark:nth-child(3) { --dx: 96px; --dy: -40px; }
+    .spark:nth-child(4) { --dx: -96px; --dy: 40px; }
+    .spark:nth-child(5) { --dx: 0px; --dy: 54px; }
+    .spark:nth-child(6) { --dx: 96px; --dy: 40px; }
+    @keyframes spark-fly {
+      0% { translate: 0 0; opacity: 1; }
+      70% { opacity: 1; }
+      100% { translate: var(--dx) var(--dy); opacity: 0; }
+    }
+    /* ゆれる: うまくいかなかった入力欄やボタンが、左右に4pxずつ揺れる（0.3秒） */
+    .shake { animation: shake-x 300ms linear both; }
+    @keyframes shake-x {
+      0%, 100% { translate: 0 0; }
+      20% { translate: -4px 0; }
+      40% { translate: 4px 0; }
+      60% { translate: -4px 0; }
+      80% { translate: 4px 0; }
+    }
+
     input[type="text"], input[type="date"] {
       width: 100%;
       max-width: 440px;
@@ -1076,6 +1134,9 @@
       *, *::before, *::after { animation: none !important; transition: none !important; }
       .screen::before { display: none; }
       .hop { display: none; }
+      /* ポップ演出も出さない（app.js の popEl も、この設定のときは何も付けない） */
+      .pop, .pon, .pop-sparkle, .shake { animation: none !important; }
+      .spark-burst { display: none; }
       button:active, button[aria-pressed="true"], #evening:active, button.primary:active { transform: none; }
     }
     [hidden] { display: none !important; }
