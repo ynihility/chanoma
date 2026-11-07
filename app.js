@@ -8,7 +8,7 @@ import { createRoomClient, parseInvite, hasInvite, SYNC_MS } from './room.js';
 import { play, setMuted, hostBlips, stopBlips } from './sound.js';
 import { voiceSupported, listen } from './voice.js';
 import { spriteCanvas } from './pixel.js';
-import { LEVEL_KEY, xpOf, loadLevel, addXp, serializeLevel } from './level.js';
+import { LEVEL_KEY, xpOf, loadLevel, addXp, serializeLevel, whenAtTop } from './level.js';
 
 // 演出（canvas）は飾り。読み込めなかったときも、投稿と放送は動かす
 let fx = null;
@@ -700,6 +700,8 @@ function renderLevel() {
 }
 
 let levelMsgTimer = 0;
+// 上に戻るのを待っている一言の取り消し（続けてレベルが上がったとき、前の待ちを捨てる）
+let cancelLevelWait = () => {};
 // レベルが上がったときの一言。AI が考えた言葉ではなく、アプリの決まった言葉なので、「AI が考えた」とは読み上げない
 function showLevelUp() {
   const msg = $('level-msg');
@@ -725,8 +727,12 @@ function gainXp(post) {
   }
   renderLevel();
   if (next.up) {
-    popEl($('level-badge'), 'sparkle');
-    showLevelUp();
+    // 画面の下で送ったとき、上に戻る前に出すと見えないまま消えるので、上に着いてから札の演出と一言を出す
+    cancelLevelWait();
+    cancelLevelWait = whenAtTop(window, () => {
+      popEl($('level-badge'), 'sparkle');
+      showLevelUp();
+    });
   }
 }
 

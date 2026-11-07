@@ -1,7 +1,7 @@
 // level.js のテスト。レベルの計算と、保存データの読み込み。実行: node --test
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { levelOf, xpOf, loadLevel, addXp, serializeLevel, XP_POST, XP_STAMP } from '../level.js';
+import { levelOf, xpOf, loadLevel, addXp, serializeLevel, whenAtTop, XP_POST, XP_STAMP } from '../level.js';
 
 test('levelOf: 投稿 1 件で Lv.2、4 件で Lv.3、9 件で Lv.4（境目の前後も確かめる）', () => {
   assert.equal(levelOf(0), 1);
@@ -51,4 +51,64 @@ test('loadLevel: 壊れた保存データは、最初の状態に戻す', () => 
   for (const raw of [null, undefined, '', 'こわれた', '[]', 'null', '{}', '{"xp":-1}', '{"xp":1.5}', '{"xp":"3"}', '{"xp":1e12}', '{"xp":null}', 42, 'x'.repeat(2000)]) {
     assert.deepEqual(loadLevel(raw), first, String(raw).slice(0, 20));
   }
+});
+
+// ---- whenAtTop: 上に戻ってから一言を出す ----
+// window の代わりの、スクロール位置と scroll の聞き役だけを持つ見本
+function fakeWindow(scrollY) {
+  const listeners = new Set();
+  return {
+    scrollY,
+    addEventListener: (type, fn) => type === 'scroll' && listeners.add(fn),
+    removeEventListener: (type, fn) => type === 'scroll' && listeners.delete(fn),
+    scrollTo(y) {
+      this.scrollY = y;
+      for (const fn of [...listeners]) fn();
+    },
+    count: () => listeners.size,
+  };
+}
+
+test('whenAtTop: すでに上にいれば、その場で 1 回だけ呼ぶ', () => {
+  const win = fakeWindow(0);
+  let n = 0;
+  whenAtTop(win, () => n++);
+  assert.equal(n, 1);
+  assert.equal(win.count(), 0);
+});
+
+test('whenAtTop: 下にいるあいだは呼ばず、上に着いたとき 1 回だけ呼ぶ（聞き役も外す）', () => {
+  const win = fakeWindow(5264);
+  let n = 0;
+  whenAtTop(win, () => n++, { timeoutMs: 5000 });
+  assert.equal(n, 0);
+  win.scrollTo(2000);
+  win.scrollTo(41); // 境目の外（40 より下）
+  assert.equal(n, 0);
+  win.scrollTo(40); // 境目（40 以内は上とみなす）
+  assert.equal(n, 1);
+  win.scrollTo(0);
+  assert.equal(n, 1);
+  assert.equal(win.count(), 0);
+});
+
+test('whenAtTop: 上に戻らないときは、時間が来たらその場で呼ぶ', async () => {
+  const win = fakeWindow(900);
+  let n = 0;
+  whenAtTop(win, () => n++, { timeoutMs: 30 });
+  assert.equal(n, 0);
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(n, 1);
+  assert.equal(win.count(), 0);
+});
+
+test('whenAtTop: 取り消せば、上に着いても時間が来ても呼ばない', async () => {
+  const win = fakeWindow(900);
+  let n = 0;
+  const cancel = whenAtTop(win, () => n++, { timeoutMs: 30 });
+  cancel();
+  win.scrollTo(0);
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(n, 0);
+  assert.equal(win.count(), 0);
 });

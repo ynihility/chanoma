@@ -37,3 +37,31 @@ export function addXp(current, gain) {
 }
 
 export const serializeLevel = (current) => JSON.stringify({ xp: current.xp, level: current.level });
+
+// ページが上まで戻ってから run を1回だけ呼ぶ。レベルアップの一言は、送信後に画面が上へ戻る前に出すと
+// 下にいる人には見えないまま時間が過ぎるため、見える位置に着いてから出す。
+// 上に戻らないとき（本人が画面を動かしたとき）のために、timeoutMs たったら、その場で出す。戻り値は取り消す関数
+export function whenAtTop(win, run, { topPx = 40, timeoutMs = 6000 } = {}) {
+  let done = false;
+  let timer = 0;
+  const cancel = () => {
+    done = true;
+    clearTimeout(timer);
+    win.removeEventListener('scroll', onScroll);
+  };
+  const fire = () => {
+    if (done) return;
+    cancel();
+    run();
+  };
+  function onScroll() {
+    if (win.scrollY <= topPx) fire();
+  }
+  if (win.scrollY <= topPx) {
+    fire();
+    return cancel;
+  }
+  win.addEventListener('scroll', onScroll, { passive: true });
+  timer = setTimeout(fire, timeoutMs);
+  return cancel;
+}
