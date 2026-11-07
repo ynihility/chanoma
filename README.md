@@ -15,6 +15,12 @@ A family connects through a **room**. Everyone opens the same room on their own 
 - **Shelf.** Every device keeps the programs it has watched in its own "shelf" (up to 60 programs, 2 MB). When a device enters a room, devices swap their shelves through the server, so a family member who joins later can watch past programs too. Programs that come back this way are marked "returned from a device", and are checked again on arrival.
 - **Without a room**, the app still works on one device, as before.
 
+## Stamps, the tea room and levels
+
+- **Stamps.** Instead of writing, a family member can send one of six pixel-art stamps (a teacup, a mandarin, a rice ball, a flower, a star, a futon) with one tap. Claude introduces a stamp by name in the "today's words" corner and adds no meaning to it. Stamps count toward the 30 posts a day.
+- **Tea room.** A small pixel-art living room at the top of the page shows the animals of the family. They walk, sit and hop at random, whether or not anyone has posted. At 7 p.m. the TV lights up and they gather in front of it. It pauses when the tab is hidden and stays still under "reduce motion".
+- **Level.** Your own character levels up as you post (+3 per post, +1 per stamp), with a short sending animation ("sending..." then "arrived"). The level lives only in this device's localStorage. It is never sent anywhere and never compared with other family members.
+
 ## How to try it
 
 You need Node.js 20.19 or later (`AbortSignal.any` is used; tested with v24 only). There are no npm dependencies.
@@ -172,6 +178,12 @@ No read receipts, no nagging, no rankings, nothing public, and no health or lone
 - **夜7時。** だれかが「夜7時にする」を押すと、サーバーが、その日の部屋の投稿から番組を作ります。番組がすでにあれば、全員が同じ番組を受け取り、Claude は二重に呼ばれません。番組を作ったあとに届いた投稿は、テレビの下に「番組のあとに届いた一言」として並びます。
 - **本棚。** 各端末は、見た番組を自分の「本棚」に残します（60本、2MBまで）。部屋に入ると、端末どうしがサーバーを通して本棚を持ち寄るので、あとから入った家族も、過去の番組を見られます。持ち寄りで戻った番組には「端末から戻した番組です」と出し、受け取るときにもう一度検査します。
 - **部屋に入らなくても**、今までどおり、1台の中だけで使えます。
+
+## スタンプ、茶の間、レベル
+
+- **スタンプ。** 文字を書かなくても、6 種のドット絵のスタンプ（ゆのみ・みかん・おにぎり・はな・ほし・ふとん）を、ワンタッチで送れます。テレ吉は、きょうの一言のコーナーで、スタンプの名前を言って紹介します。意味は足しません。スタンプも、1 日 30 件の上限に数えます。
+- **茶の間。** 画面の上の小さなドット絵の茶の間に、家族の動物が出ます。歩く・座る・はねるは乱数で決まり、だれかが投稿したかどうかでは変わりません。夜 7 時はテレビが光り、動物がテレビの前に集まります。タブが見えないときは止まり、「動きを減らす」設定のときは静止画になります。
+- **レベル。** 投稿すると、自分のキャラのレベルが上がります（投稿 +3、スタンプ +1）。送っている間は「おくっています」、届くと「とどきました」と出ます。レベルは、この端末の localStorage にだけあり、どこにも送らず、家族のレベルとも比べません。
 
 ## 試しかた
 
