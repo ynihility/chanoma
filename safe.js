@@ -246,6 +246,9 @@ function fold(s) {
   return t.replace(/([ぁ-ん])(ー+)/g, (_, c, bars) => c + vowelOf(c).repeat(bars.length));
 }
 const foldAll = (list) => list.map(fold);
+// fold 済みの文に、「(名前)のスタンプ」か「スタンプ(名前)」の形で、スタンプの名前があるか
+const STAMP_WORD = fold('スタンプ');
+const stampMention = (foldedText, name) => foldedText.includes(`${fold(name)}の${STAMP_WORD}`) || foldedText.includes(`${STAMP_WORD}${fold(name)}`);
 const removeAll = (s, words) => words.reduce((t, w) => t.split(w).join(''), s);
 
 // 家族のよびかた。長い語から探して、見つけた所は消す（「ひいおじいちゃん」の中の「おじいちゃん」を二重に数えない）
@@ -553,8 +556,14 @@ export function checkNews(news, posts) {
     if (typeof host !== 'string' || host.trim() === '' || host.length > MAX_HOST_CHARS) return bad('host の長さや型が違う');
     const w = wordProblem(host, ctx);
     if (w) return bad(`host(${from}): ${w}`);
-    // スタンプの紹介には、そのスタンプの名前が入っていること（別のものを言ったり、名前を言わなかったりしていないか）
-    if (isStamp(post) && !fold(host).includes(fold(post.stamp))) return bad(`host(${from}): スタンプの名前が、つなぎの言葉にない`);
+    // スタンプの紹介には、「みかんのスタンプ」「スタンプみかん」の形で、そのスタンプの名前が入っていること。
+    // 名前だけを探すと、「はな」が「おはなし」に、「ほし」が「ほしい」に当たってしまうため、スタンプという語の隣に限る。
+    // ほかのスタンプの名前を同じ形で言っていたら、意味や気持ちを足している疑いがあるので弾く（これは補助で、守らせる主役は prompt.txt）
+    if (isStamp(post)) {
+      const said = (name) => stampMention(fold(host), name);
+      if (!said(post.stamp)) return bad(`host(${from}): スタンプの名前が、つなぎの言葉にない`);
+      if (STAMPS.some((name) => name !== post.stamp && said(name))) return bad(`host(${from}): ほかのスタンプの名前が、つなぎの言葉にある`);
+    }
     segments.push({ corner, from, host: host.trim() });
   }
   if (used.size !== posts.length) return bad('使われていない投稿がある');

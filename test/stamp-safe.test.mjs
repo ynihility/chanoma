@@ -136,3 +136,39 @@ test('checkShelfProgram: スタンプの投稿を含む番組も、本棚・部�
   assert.equal(r.ok, true, r.error);
   assert.deepEqual(r.program.posts[1], mixed[1]);
 });
+
+// ---- スタンプの名前の検査（別の語の中に名前があるだけでは通さない） ----
+const withStamp = (name) => cleanPosts({ posts: [text, stamp({ stamp: name })] }).posts;
+
+test('checkNews: 弾く - 名前が別の語の中にあるだけ（「はな」が「おはなし」に、「ほし」が「ほしい」に当たる）', () => {
+  const cases = [
+    ['はな', 'まごからです。おはなしをどうぞ。'],
+    ['ほし', 'まごからのスタンプです。ほしいものがあるそうです。'],
+  ];
+  for (const [name, host] of cases) {
+    const r = checkNews(news(host), withStamp(name));
+    assert.equal(r.ok, false, host);
+    assert.ok(r.reason.includes('スタンプの名前が、つなぎの言葉にない'), r.reason);
+  }
+});
+
+test('checkNews: 通す - 「名前のスタンプ」「スタンプ名前」の形（ひらがな・半角カナの違いも同じ扱い）', () => {
+  const cases = [
+    ['はな', 'まごから、はなのスタンプです。'],
+    ['はな', 'まごから、スタンプはなが届きました。'],
+    ['ほし', 'まごから、ほしのスタンプです。'],
+    ['おにぎり', 'まごから、おにぎりのｽﾀﾝﾌﾟです。'],
+    ['ゆのみ', 'まごから、ゆのみのすたんぷです。'],
+  ];
+  for (const [name, host] of cases) {
+    const r = checkNews(news(host), withStamp(name));
+    assert.equal(r.ok, true, `${name}: ${host} ${r.reason}`);
+  }
+});
+
+test('checkNews: 弾く - ほかのスタンプの名前も同じ形で言っている（意味や気持ちを足す疑い）', () => {
+  const r = checkNews(news('まごから、はなのスタンプです。ほしのスタンプのようです。'), withStamp('はな'));
+  assert.equal(r.ok, false);
+  assert.ok(r.reason.includes('ほかのスタンプの名前が、つなぎの言葉にある'), r.reason);
+  assert.ok(!/[「」]/.test(r.reason), r.reason);
+});
