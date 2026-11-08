@@ -8,6 +8,10 @@ Built for *Built with Claude: Japan 2026*. All code, pixel art and sound effects
 
 Watch the Japanese demo video (2 min 42 s): https://youtu.be/zhEXemxioEQ
 
+## Try it
+
+Live app (no login): https://chanoma-ynihility.onrender.com — it runs on a free host, so the first visit can take about 60 seconds to wake up. On this public server, programs are made inside a room: press 「部屋に入る」 then 「新しく部屋を作る」 first.
+
 ## Rooms: one show, on everyone's own device
 
 A family connects through a **room**. Everyone opens the same room on their own phone or PC, posts there, and watches the same program at 7 p.m.
@@ -190,6 +194,10 @@ No read receipts, no nagging, no rankings, nothing public, and no health or lone
 ## デモ動画
 
 日本語のデモ動画（2 分 42 秒）: https://youtu.be/zhEXemxioEQ
+
+## さわってみる
+
+動いているアプリ（ログイン不要）: https://chanoma-ynihility.onrender.com 。無料のサーバーなので、初回は起きるまで約60秒かかります。この公開サーバーでは番組は部屋の中で作るので、先に「部屋に入る」→「新しく部屋を作る」を押してください。
 
 ## 部屋：それぞれの端末で、同じ番組を見る
 
