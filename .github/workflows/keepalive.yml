@@ -1,18 +1,26 @@
-# 審査期間（2026-11-08〜11-09）だけ、無料の置き場所が寝ないように 10 分おきに表紙を取りに行く。
+# 審査期間（2026-11-08〜11-10）だけ、無料の置き場所が寝ないように 5 分おきに表紙を取りに行く。
 # Claude は呼ばない（API のクレジットは使わない）。審査が終わったら、このファイルを消すか schedule をコメントにする。
+# GitHub の予定実行は混んでいると遅れることがあるので、作者のパソコンからも同じことをしている（リポジトリの外）。
 name: keepalive
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
       - name: Wake the free instance
         run: |
-          # 起きるまで 50 秒以上かかることがあるので、待ち時間を長めに取る。失敗してもジョブは落とさない
-          curl -sS -o /dev/null -w "status %{http_code} time %{time_total}s\n" --max-time 90 https://chanoma-ynihility.onrender.com/ || true
+          # 起きるまで 50 秒以上かかることがあるので、待ち時間を長めに取り、1 回だけやり直す。
+          # 200 以外なら失敗にして、Actions の画面で止まっていることが分かるようにする
+          for i in 1 2; do
+            code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 120 https://chanoma-ynihility.onrender.com/ || echo 000)
+            echo "try $i: status $code"
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 20
+          done
+          exit 1
